@@ -1,0 +1,15 @@
+alias: Salon 19°
+description: Set Salon to 19°C (only if already on)
+icon: mdi:sofa-outline
+sequence:
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: climate.zone_control_salon
+        state: "off"
+  - action: climate.set_temperature
+    target:
+      entity_id: climate.zone_control_salon
+    data:
+      temperature: 19
+mode: single

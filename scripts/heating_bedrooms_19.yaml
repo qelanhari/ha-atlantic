@@ -1,0 +1,21 @@
+alias: Bedrooms 19°
+description: Turn on heating in all bedrooms and set to 19°C
+icon: mdi:bed
+sequence:
+  - action: climate.set_hvac_mode
+    target:
+      entity_id:
+        - climate.zone_control_chambre
+        - climate.zone_control_chambre_romy
+        - climate.zone_control_chambre_malo
+    data:
+      hvac_mode: auto
+  - action: climate.set_temperature
+    target:
+      entity_id:
+        - climate.zone_control_chambre
+        - climate.zone_control_chambre_romy
+        - climate.zone_control_chambre_malo
+    data:
+      temperature: 19
+mode: single
