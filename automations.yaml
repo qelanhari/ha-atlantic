@@ -151,6 +151,10 @@
         - wed
         - thu
         - fri
+    - condition: template
+      value_template: >
+        {{ not (is_state('calendar.calendrier', 'on')
+           and state_attr('calendar.calendrier', 'message') == 'Cowork') }}
   action:
     - action: climate.set_hvac_mode
       target:
