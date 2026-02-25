@@ -1,4 +1,5 @@
-- name: Salon 22
+- id: heating_salon_22
+  name: Salon 22
   icon: mdi:sofa
   entities:
     climate.zone_control_salon:

@@ -1,4 +1,5 @@
-- name: Bedrooms 19
+- id: heating_bedrooms_19
+  name: Bedrooms 19
   icon: mdi:bed
   entities:
     climate.zone_control_chambre:
