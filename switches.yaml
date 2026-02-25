@@ -1,0 +1,107 @@
+- switch:
+    - name: "Chambres 19°C"
+      unique_id: heating_chambres_19
+      icon: mdi:bed
+      state: >
+        {{ is_state('climate.zone_control_chambre', 'auto')
+           and state_attr('climate.zone_control_chambre', 'temperature') == 19
+           and is_state('climate.zone_control_chambre_romy', 'auto')
+           and state_attr('climate.zone_control_chambre_romy', 'temperature') == 19
+           and is_state('climate.zone_control_chambre_malo', 'auto')
+           and state_attr('climate.zone_control_chambre_malo', 'temperature') == 19 }}
+      turn_on:
+        - action: climate.set_hvac_mode
+          target:
+            entity_id:
+              - climate.zone_control_chambre
+              - climate.zone_control_chambre_romy
+              - climate.zone_control_chambre_malo
+          data:
+            hvac_mode: auto
+        - action: climate.set_temperature
+          target:
+            entity_id:
+              - climate.zone_control_chambre
+              - climate.zone_control_chambre_romy
+              - climate.zone_control_chambre_malo
+          data:
+            temperature: 19
+      turn_off:
+        - action: climate.set_hvac_mode
+          target:
+            entity_id:
+              - climate.zone_control_chambre
+              - climate.zone_control_chambre_romy
+              - climate.zone_control_chambre_malo
+          data:
+            hvac_mode: "off"
+
+    - name: "Salon 19°C"
+      unique_id: heating_salon_19
+      icon: mdi:sofa-outline
+      state: >
+        {{ is_state('climate.zone_control_salon', 'auto')
+           and state_attr('climate.zone_control_salon', 'temperature') == 19 }}
+      turn_on:
+        - action: climate.set_hvac_mode
+          target:
+            entity_id: climate.zone_control_salon
+          data:
+            hvac_mode: auto
+        - action: climate.set_temperature
+          target:
+            entity_id: climate.zone_control_salon
+          data:
+            temperature: 19
+      turn_off:
+        - action: climate.set_hvac_mode
+          target:
+            entity_id: climate.zone_control_salon
+          data:
+            hvac_mode: "off"
+
+    - name: "Salon 22°C"
+      unique_id: heating_salon_22
+      icon: mdi:sofa
+      state: >
+        {{ is_state('climate.zone_control_salon', 'auto')
+           and state_attr('climate.zone_control_salon', 'temperature') == 22 }}
+      turn_on:
+        - action: climate.set_hvac_mode
+          target:
+            entity_id: climate.zone_control_salon
+          data:
+            hvac_mode: auto
+        - action: climate.set_temperature
+          target:
+            entity_id: climate.zone_control_salon
+          data:
+            temperature: 22
+      turn_off:
+        - action: climate.set_hvac_mode
+          target:
+            entity_id: climate.zone_control_salon
+          data:
+            hvac_mode: "off"
+
+    - name: "Chauffage Off"
+      unique_id: heating_all_off
+      icon: mdi:radiator-off
+      state: >
+        {{ is_state('climate.zone_control_salon', 'off')
+           and is_state('climate.zone_control_chambre', 'off')
+           and is_state('climate.zone_control_chambre_romy', 'off')
+           and is_state('climate.zone_control_bureau', 'off')
+           and is_state('climate.zone_control_chambre_malo', 'off') }}
+      turn_on:
+        - action: climate.set_hvac_mode
+          target:
+            entity_id:
+              - climate.zone_control_salon
+              - climate.zone_control_chambre
+              - climate.zone_control_chambre_romy
+              - climate.zone_control_bureau
+              - climate.zone_control_chambre_malo
+          data:
+            hvac_mode: "off"
+      turn_off: []
