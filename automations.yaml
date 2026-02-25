@@ -31,14 +31,56 @@
         - thu
         - fri
   action:
+    # Parents - always off on weekdays
     - action: climate.set_hvac_mode
       target:
-        entity_id:
-          - climate.zone_control_chambre
-          - climate.zone_control_chambre_romy
-          - climate.zone_control_chambre_malo
+        entity_id: climate.zone_control_chambre
       data:
         hvac_mode: "off"
+    # Romy - off unless on holiday with nothing planned
+    - if:
+        - condition: or
+          conditions:
+            - condition: state
+              entity_id: sensor.vacances_scolaires_aujourd_hui_zone_c
+              state: "Pas en vacances"
+            - condition: state
+              entity_id: sensor.vacances_scolaires_aujourd_hui_zone_c
+              state: unavailable
+            - condition: state
+              entity_id: sensor.vacances_scolaires_aujourd_hui_zone_c
+              state: unknown
+            - condition: state
+              entity_id: calendar.romy
+              state: "on"
+      then:
+        - action: climate.set_hvac_mode
+          target:
+            entity_id: climate.zone_control_chambre_romy
+          data:
+            hvac_mode: "off"
+    # Malo - off unless on holiday with nothing planned
+    - if:
+        - condition: or
+          conditions:
+            - condition: state
+              entity_id: sensor.vacances_scolaires_aujourd_hui_zone_c
+              state: "Pas en vacances"
+            - condition: state
+              entity_id: sensor.vacances_scolaires_aujourd_hui_zone_c
+              state: unavailable
+            - condition: state
+              entity_id: sensor.vacances_scolaires_aujourd_hui_zone_c
+              state: unknown
+            - condition: state
+              entity_id: calendar.malo
+              state: "on"
+      then:
+        - action: climate.set_hvac_mode
+          target:
+            entity_id: climate.zone_control_chambre_malo
+          data:
+            hvac_mode: "off"
 
 - id: heating_salon_22_morning
   alias: "Salon 22°C le matin"
