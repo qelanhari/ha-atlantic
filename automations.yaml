@@ -135,13 +135,15 @@
       data:
         temperature: 19
 
-- id: heating_bureau_on_presence
-  alias: "Bureau 22°C si présent (semaine)"
+- id: heating_bureau_on_morning
+  alias: "Bureau 22°C le matin (semaine)"
   trigger:
-    - platform: state
-      entity_id: input_boolean.presence
-      to: "on"
+    - platform: time
+      at: "08:00:00"
   condition:
+    - condition: state
+      entity_id: input_boolean.presence
+      state: "on"
     - condition: time
       weekday:
         - mon
