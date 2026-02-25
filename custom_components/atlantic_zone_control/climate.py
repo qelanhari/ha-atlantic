@@ -373,18 +373,12 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
         """Refresh device modes to get updated states."""
         await sleep(2)
 
-        await self.executor.async_execute_command(
-            OverkizCommand.REFRESH_PASS_APC_HEATING_MODE
-        )
-        await self.executor.async_execute_command(
-            OverkizCommand.REFRESH_PASS_APC_HEATING_PROFILE
-        )
-        await self.executor.async_execute_command(
-            OverkizCommand.REFRESH_PASS_APC_COOLING_MODE
-        )
-        await self.executor.async_execute_command(
-            OverkizCommand.REFRESH_PASS_APC_COOLING_PROFILE
-        )
-        await self.executor.async_execute_command(
-            OverkizCommand.REFRESH_TARGET_TEMPERATURE
+        await self.executor.async_execute_commands(
+            [
+                Command(OverkizCommand.REFRESH_PASS_APC_HEATING_MODE, []),
+                Command(OverkizCommand.REFRESH_PASS_APC_HEATING_PROFILE, []),
+                Command(OverkizCommand.REFRESH_PASS_APC_COOLING_MODE, []),
+                Command(OverkizCommand.REFRESH_PASS_APC_COOLING_PROFILE, []),
+                Command(OverkizCommand.REFRESH_TARGET_TEMPERATURE, []),
+            ]
         )
