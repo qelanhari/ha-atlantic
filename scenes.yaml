@@ -3,13 +3,13 @@
   icon: mdi:bed
   entities:
     climate.zone_control_chambre:
-      state: heat_cool
+      state: "auto"
       temperature: 19
     climate.zone_control_chambre_romy:
-      state: heat_cool
+      state: "auto"
       temperature: 19
     climate.zone_control_chambre_malo:
-      state: heat_cool
+      state: "auto"
       temperature: 19
 
 - id: heating_bedrooms_off
@@ -28,7 +28,7 @@
   icon: mdi:sofa-outline
   entities:
     climate.zone_control_salon:
-      state: heat_cool
+      state: "auto"
       temperature: 19
 
 - id: heating_salon_22
@@ -36,7 +36,7 @@
   icon: mdi:sofa
   entities:
     climate.zone_control_salon:
-      state: heat_cool
+      state: "auto"
       temperature: 22
 
 - id: heating_all_off

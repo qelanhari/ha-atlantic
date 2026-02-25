@@ -3,5 +3,5 @@
   icon: mdi:sofa-outline
   entities:
     climate.zone_control_salon:
-      state: heat_cool
+      state: "auto"
       temperature: 19

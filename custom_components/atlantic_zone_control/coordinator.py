@@ -175,6 +175,12 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
     ) -> None:
         """Queue commands for a device, flushing after a short delay."""
         self._command_queue.setdefault(device_url, []).extend(commands)
+        LOGGER.debug(
+            "Queued %d command(s) for %s: %s",
+            len(commands),
+            device_url,
+            [c.name for c in commands],
+        )
 
         if post_flush is not None and post_flush not in self._post_flush_callbacks:
             self._post_flush_callbacks.append(post_flush)
@@ -197,6 +203,12 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         if not queue:
             return
 
+        LOGGER.debug(
+            "Flushing commands for %d device(s): %s",
+            len(queue),
+            {url: [c.name for c in cmds] for url, cmds in queue.items()},
+        )
+
         if self._batch_executor.supports_multi_device and len(queue) > 1:
             actions = [
                 {"deviceURL": url, "commands": cmds}
@@ -209,14 +221,21 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
                 exec_id = None
 
             if exec_id:
+                LOGGER.debug(
+                    "Multi-device batch sent: exec_id=%s, %d device(s)",
+                    exec_id,
+                    len(queue),
+                )
                 for device_url in queue:
                     self.executions[exec_id] = {
                         "device_url": device_url,
                         "command_name": "multi-device-batch",
                     }
             else:
+                LOGGER.debug("Multi-device batch failed, falling back to per-device")
                 await self._execute_per_device(queue)
         else:
+            LOGGER.debug("Using per-device execution (single device or adapter unavailable)")
             await self._execute_per_device(queue)
 
         await self.async_refresh()
@@ -229,6 +248,12 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
     ) -> None:
         """Execute queued commands one device at a time (fallback)."""
         for device_url, commands in queue.items():
+            LOGGER.debug(
+                "Executing %d command(s) for %s: %s",
+                len(commands),
+                device_url,
+                [c.name for c in commands],
+            )
             try:
                 exec_id = await self.client.execute_commands(
                     device_url, commands, "Home Assistant"
