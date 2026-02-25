@@ -1,0 +1,25 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Atlantic Zone Control",
+        "description": "Enter your Somfy TaHoma Switch credentials.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the server.",
+      "invalid_auth": "Invalid authentication. Please check your credentials.",
+      "too_many_requests": "Too many requests. Please try again later.",
+      "server_in_maintenance": "Server is down for maintenance.",
+      "too_many_attempts": "Too many attempts. You have been temporarily banned.",
+      "unknown": "An unknown error occurred."
+    },
+    "abort": {
+      "already_configured": "This gateway is already configured."
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "atlantic_zone_control",
+  "name": "Atlantic Zone Control",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "",
+  "iot_class": "cloud_polling",
+  "requirements": ["pyoverkiz==1.20.0"],
+  "version": "1.0.0"
+}
