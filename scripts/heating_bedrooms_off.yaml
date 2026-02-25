@@ -1,0 +1,13 @@
+alias: Bedrooms Off
+description: Turn off heating in all bedrooms
+icon: mdi:bed-outline
+sequence:
+  - action: climate.set_hvac_mode
+    target:
+      entity_id:
+        - climate.zone_control_chambre
+        - climate.zone_control_chambre_romy
+        - climate.zone_control_chambre_malo
+    data:
+      hvac_mode: "off"
+mode: single
