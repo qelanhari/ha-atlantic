@@ -199,3 +199,69 @@
         entity_id: climate.zone_control_bureau
       data:
         hvac_mode: "off"
+
+- id: heating_salon_20_chloe_depart
+  alias: "Salon 20°C quand Chloé part (semaine)"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.presence_chloe
+      to: "off"
+  condition:
+    - condition: state
+      entity_id: input_boolean.presence
+      state: "on"
+    - condition: time
+      weekday:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+    - condition: time
+      before: "12:00:00"
+  action:
+    - action: climate.set_temperature
+      target:
+        entity_id: climate.zone_control_salon
+      data:
+        temperature: 20
+
+- id: heating_salon_off_cowork
+  alias: "Salon off si Cowork"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.presence
+      to: "off"
+  condition:
+    - condition: template
+      value_template: >
+        {{ is_state('calendar.calendrier', 'on')
+           and state_attr('calendar.calendrier', 'message') == 'Cowork' }}
+    - condition: time
+      weekday:
+        - mon
+        - tue
+        - thu
+        - fri
+    - condition: time
+      before: "16:00:00"
+  action:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: climate.zone_control_salon
+      data:
+        hvac_mode: "off"
+
+- id: heating_salon_off_absence_1h
+  alias: "Salon off si absent 1h"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.presence
+      to: "off"
+      for: "01:00:00"
+  action:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: climate.zone_control_salon
+      data:
+        hvac_mode: "off"
