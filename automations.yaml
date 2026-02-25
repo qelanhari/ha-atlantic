@@ -134,3 +134,62 @@
           - climate.zone_control_chambre_malo
       data:
         temperature: 19
+
+- id: heating_bureau_on_presence
+  alias: "Bureau 22°C si présent (semaine)"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.presence
+      to: "on"
+  condition:
+    - condition: time
+      weekday:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+  action:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: climate.zone_control_bureau
+      data:
+        hvac_mode: auto
+    - action: climate.set_temperature
+      target:
+        entity_id: climate.zone_control_bureau
+      data:
+        temperature: 22
+
+- id: heating_bureau_off_absence
+  alias: "Bureau off si absent"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.presence
+      to: "off"
+  action:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: climate.zone_control_bureau
+      data:
+        hvac_mode: "off"
+
+- id: heating_bureau_off_evening
+  alias: "Bureau off le soir (semaine)"
+  trigger:
+    - platform: time
+      at: "18:00:00"
+  condition:
+    - condition: time
+      weekday:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+  action:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: climate.zone_control_bureau
+      data:
+        hvac_mode: "off"
