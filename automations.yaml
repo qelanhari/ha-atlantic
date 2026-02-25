@@ -214,7 +214,6 @@
       weekday:
         - mon
         - tue
-        - wed
         - thu
         - fri
     - condition: time
