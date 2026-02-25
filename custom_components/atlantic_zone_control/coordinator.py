@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Callable, Coroutine
 from datetime import timedelta
 import logging
@@ -11,7 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from aiohttp import ClientConnectorError, ServerDisconnectedError
 from pyoverkiz.client import OverkizClient
-from pyoverkiz.enums import EventName, ExecutionState, Protocol
+from pyoverkiz.enums import EventName, ExecutionState, OverkizCommand, Protocol
 from pyoverkiz.exceptions import (
     BadCredentialsException,
     BaseOverkizException,
@@ -106,7 +105,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
 
         self._command_queue: dict[str, list[Command]] = {}
         self._flush_handle: asyncio.TimerHandle | None = None
-        self._post_flush_callbacks: list[Callable[[], Coroutine[Any, Any, None]]] = []
+        self._refresh_device_urls: set[str] = set()
         self._batch_executor = OverkizBatchExecutor(client)
 
     async def _async_update_data(self) -> dict[str, Device]:
@@ -171,7 +170,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self,
         device_url: str,
         commands: list[Command],
-        post_flush: Callable[[], Coroutine[Any, Any, None]] | None = None,
+        needs_mode_refresh: bool = False,
     ) -> None:
         """Queue commands for a device, flushing after a short delay."""
         self._command_queue.setdefault(device_url, []).extend(commands)
@@ -182,8 +181,8 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             [c.name for c in commands],
         )
 
-        if post_flush is not None and post_flush not in self._post_flush_callbacks:
-            self._post_flush_callbacks.append(post_flush)
+        if needs_mode_refresh:
+            self._refresh_device_urls.add(device_url)
 
         if self._flush_handle is not None:
             self._flush_handle.cancel()
@@ -197,8 +196,8 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self._flush_handle = None
         queue = self._command_queue
         self._command_queue = {}
-        callbacks = self._post_flush_callbacks
-        self._post_flush_callbacks = []
+        refresh_urls = self._refresh_device_urls
+        self._refresh_device_urls = set()
 
         if not queue:
             return
@@ -240,8 +239,8 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
 
         await self.async_refresh()
 
-        for callback in callbacks:
-            await callback()
+        if refresh_urls:
+            await self._async_refresh_modes(refresh_urls)
 
     async def _execute_per_device(
         self, queue: dict[str, list[Command]]
@@ -270,6 +269,49 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
                 "device_url": device_url,
                 "command_name": commands[0].name if commands else "batch",
             }
+
+    async def _async_refresh_modes(self, device_urls: set[str]) -> None:
+        """Refresh mode states for devices, batched into a single API call."""
+        await asyncio.sleep(2)
+
+        refresh_commands = [
+            Command(OverkizCommand.REFRESH_PASS_APC_HEATING_MODE, []),
+            Command(OverkizCommand.REFRESH_PASS_APC_HEATING_PROFILE, []),
+            Command(OverkizCommand.REFRESH_PASS_APC_COOLING_MODE, []),
+            Command(OverkizCommand.REFRESH_PASS_APC_COOLING_PROFILE, []),
+            Command(OverkizCommand.REFRESH_TARGET_TEMPERATURE, []),
+        ]
+
+        refresh_queue = {url: list(refresh_commands) for url in device_urls}
+
+        LOGGER.debug(
+            "Refreshing modes for %d device(s): %s",
+            len(device_urls),
+            list(device_urls),
+        )
+
+        if self._batch_executor.supports_multi_device and len(refresh_queue) > 1:
+            actions = [
+                {"deviceURL": url, "commands": cmds}
+                for url, cmds in refresh_queue.items()
+            ]
+            try:
+                exec_id = await self._batch_executor.execute_multi(actions)
+            except BaseOverkizException as exception:
+                LOGGER.error("Batch mode refresh failed: %s", exception)
+                exec_id = None
+
+            if exec_id:
+                LOGGER.debug(
+                    "Batch mode refresh sent: exec_id=%s, %d device(s)",
+                    exec_id,
+                    len(refresh_queue),
+                )
+                return
+
+            LOGGER.debug("Batch mode refresh failed, falling back to per-device")
+
+        await self._execute_per_device(refresh_queue)
 
     def set_update_interval(self, update_interval: timedelta) -> None:
         """Set the update interval and store this value."""

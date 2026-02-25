@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from asyncio import sleep
 from typing import Any, cast
 
 from pyoverkiz.enums import OverkizCommand, OverkizCommandParam, OverkizState, UIWidget
@@ -368,7 +367,7 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
             return
 
         self.coordinator.queue_commands(
-            self.device_url, commands, post_flush=self._async_refresh_modes
+            self.device_url, commands, needs_mode_refresh=True
         )
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
@@ -401,16 +400,3 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
         if commands:
             self.coordinator.queue_commands(self.device_url, commands)
 
-    async def _async_refresh_modes(self) -> None:
-        """Refresh device modes to get updated states."""
-        await sleep(2)
-
-        await self.executor.async_execute_commands(
-            [
-                Command(OverkizCommand.REFRESH_PASS_APC_HEATING_MODE, []),
-                Command(OverkizCommand.REFRESH_PASS_APC_HEATING_PROFILE, []),
-                Command(OverkizCommand.REFRESH_PASS_APC_COOLING_MODE, []),
-                Command(OverkizCommand.REFRESH_PASS_APC_COOLING_PROFILE, []),
-                Command(OverkizCommand.REFRESH_TARGET_TEMPERATURE, []),
-            ]
-        )
