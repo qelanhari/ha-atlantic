@@ -210,7 +210,7 @@ async def on_execution_registered(
         coordinator.executions[event.exec_id] = {}
 
     if not coordinator.is_stateless:
-        coordinator.update_interval = timedelta(seconds=1)
+        coordinator.update_interval = timedelta(seconds=10)
 
 
 @EVENT_HANDLERS.register(EventName.EXECUTION_STATE_CHANGED)
