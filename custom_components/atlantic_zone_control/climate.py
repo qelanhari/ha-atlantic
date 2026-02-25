@@ -150,7 +150,7 @@ class AtlanticPassAPCZoneControl(OverkizEntity, ClimateEntity):
             )
 
         if commands:
-            await self.executor.async_execute_commands(commands)
+            self.coordinator.queue_commands(self.device_url, commands)
 
 
 class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):

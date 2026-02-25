@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable, Coroutine
 from datetime import timedelta
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from aiohttp import ClientConnectorError, ServerDisconnectedError
 from pyoverkiz.client import OverkizClient
@@ -37,6 +37,32 @@ from .const import DOMAIN, IGNORED_OVERKIZ_DEVICES, LOGGER, UPDATE_INTERVAL
 EVENT_HANDLERS: Registry[
     str, Callable[[OverkizDataUpdateCoordinator, Event], Coroutine[Any, Any, None]]
 ] = Registry()
+
+
+class OverkizBatchExecutor:
+    """Executes commands across multiple devices in a single API call."""
+
+    def __init__(self, client: OverkizClient) -> None:
+        """Initialize the batch executor."""
+        self._client = client
+        self._post = getattr(client, "_OverkizClient__post", None)
+
+    @property
+    def supports_multi_device(self) -> bool:
+        """Return True if the client exposes the internal __post method."""
+        return self._post is not None
+
+    async def execute_multi(
+        self,
+        actions: list[dict[str, Any]],
+        label: str = "Home Assistant",
+    ) -> str | None:
+        """Execute a multi-device batch. Returns exec_id or None on failure."""
+        if not self._post:
+            return None
+        payload = {"label": label, "actions": actions}
+        response = await self._post("exec/apply", payload)
+        return cast(str, response["execId"])
 
 
 class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
@@ -81,6 +107,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self._command_queue: dict[str, list[Command]] = {}
         self._flush_handle: asyncio.TimerHandle | None = None
         self._post_flush_callbacks: list[Callable[[], Coroutine[Any, Any, None]]] = []
+        self._batch_executor = OverkizBatchExecutor(client)
 
     async def _async_update_data(self) -> dict[str, Device]:
         """Fetch Overkiz data via event listener."""
@@ -160,31 +187,64 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         )
 
     async def _async_flush_commands(self) -> None:
-        """Flush all queued commands, one batch per device."""
+        """Flush all queued commands, using a single API call when possible."""
         self._flush_handle = None
         queue = self._command_queue
         self._command_queue = {}
         callbacks = self._post_flush_callbacks
         self._post_flush_callbacks = []
 
+        if not queue:
+            return
+
+        if self._batch_executor.supports_multi_device and len(queue) > 1:
+            actions = [
+                {"deviceURL": url, "commands": cmds}
+                for url, cmds in queue.items()
+            ]
+            try:
+                exec_id = await self._batch_executor.execute_multi(actions)
+            except BaseOverkizException as exception:
+                LOGGER.error("Multi-device batch failed: %s", exception)
+                exec_id = None
+
+            if exec_id:
+                for device_url in queue:
+                    self.executions[exec_id] = {
+                        "device_url": device_url,
+                        "command_name": "multi-device-batch",
+                    }
+            else:
+                await self._execute_per_device(queue)
+        else:
+            await self._execute_per_device(queue)
+
+        await self.async_refresh()
+
+        for callback in callbacks:
+            await callback()
+
+    async def _execute_per_device(
+        self, queue: dict[str, list[Command]]
+    ) -> None:
+        """Execute queued commands one device at a time (fallback)."""
         for device_url, commands in queue.items():
             try:
                 exec_id = await self.client.execute_commands(
                     device_url, commands, "Home Assistant"
                 )
             except BaseOverkizException as exception:
-                LOGGER.error("Failed to execute batched commands for %s: %s", device_url, exception)
+                LOGGER.error(
+                    "Failed to execute batched commands for %s: %s",
+                    device_url,
+                    exception,
+                )
                 continue
 
             self.executions[exec_id] = {
                 "device_url": device_url,
                 "command_name": commands[0].name if commands else "batch",
             }
-
-        await self.async_refresh()
-
-        for callback in callbacks:
-            await callback()
 
     def set_update_interval(self, update_interval: timedelta) -> None:
         """Set the update interval and store this value."""
