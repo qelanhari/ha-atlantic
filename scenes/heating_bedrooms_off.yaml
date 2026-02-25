@@ -1,0 +1,9 @@
+- name: Bedrooms Off
+  icon: mdi:bed-outline
+  entities:
+    climate.zone_control_chambre:
+      hvac_mode: "off"
+    climate.zone_control_chambre_romy:
+      hvac_mode: "off"
+    climate.zone_control_chambre_malo:
+      hvac_mode: "off"

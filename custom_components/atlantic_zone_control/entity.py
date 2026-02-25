@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import cast
 
 from pyoverkiz.enums import OverkizAttribute, OverkizState
@@ -55,6 +56,13 @@ class OverkizEntity(CoordinatorEntity[OverkizDataUpdateCoordinator]):
     def device(self) -> Device:
         """Return Overkiz device linked to this entity."""
         return self.coordinator.data[self.device_url]
+
+    async def async_refresh_if_stale(self, max_age: float = 1.0) -> None:
+        """Refresh coordinator data only if last refresh was older than max_age seconds."""
+        now = time.monotonic()
+        if now - self.coordinator.last_refresh_time > max_age:
+            await self.coordinator.async_request_refresh()
+            self.coordinator.last_refresh_time = now
 
     def generate_device_info(self) -> DeviceInfo:
         """Return device registry information for this entity."""

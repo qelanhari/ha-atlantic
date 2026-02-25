@@ -1,0 +1,13 @@
+- name: Heating All Off
+  icon: mdi:radiator-off
+  entities:
+    climate.zone_control_salon:
+      hvac_mode: "off"
+    climate.zone_control_chambre:
+      hvac_mode: "off"
+    climate.zone_control_chambre_romy:
+      hvac_mode: "off"
+    climate.zone_control_bureau:
+      hvac_mode: "off"
+    climate.zone_control_chambre_malo:
+      hvac_mode: "off"

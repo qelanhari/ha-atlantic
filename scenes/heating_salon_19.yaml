@@ -1,0 +1,6 @@
+- name: Salon 19
+  icon: mdi:sofa-outline
+  entities:
+    climate.zone_control_salon:
+      hvac_mode: auto
+      temperature: 19

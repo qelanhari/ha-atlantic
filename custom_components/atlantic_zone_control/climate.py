@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from asyncio import sleep
 from typing import Any, cast
 
@@ -43,6 +44,8 @@ OVERKIZ_TO_HVAC_ACTION: dict[str, HVACAction] = {
 }
 
 ZONE_CONTROL_DEVICE_INDEX = 1
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -120,6 +123,12 @@ class AtlanticPassAPCZoneControl(OverkizEntity, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
+        await self.async_refresh_if_stale()
+
+        if hvac_mode == self.hvac_mode:
+            _LOGGER.debug("Zone control already in %s, skipping", hvac_mode)
+            return
+
         commands: list[Command] = []
 
         if self._is_auto_available:
@@ -308,47 +317,69 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode (AUTO=on+manual, OFF=off)."""
+        await self.async_refresh_if_stale()
+
         commands: list[Command] = []
+        is_on = self.hvac_mode == HVACMode.AUTO
 
         if hvac_mode == HVACMode.AUTO:
             if self._is_heating_mode:
-                commands = [
-                    Command(OverkizCommand.SET_HEATING_ON_OFF, [OverkizCommandParam.ON]),
-                    Command(
-                        OverkizCommand.SET_PASS_APC_HEATING_MODE,
-                        [OverkizCommandParam.MANU],
-                    ),
-                ]
+                if not is_on:
+                    commands.append(
+                        Command(OverkizCommand.SET_HEATING_ON_OFF, [OverkizCommandParam.ON])
+                    )
+                heating_mode = self.executor.select_state(
+                    OverkizState.IO_PASS_APC_HEATING_MODE
+                )
+                if heating_mode != OverkizCommandParam.MANU:
+                    commands.append(
+                        Command(
+                            OverkizCommand.SET_PASS_APC_HEATING_MODE,
+                            [OverkizCommandParam.MANU],
+                        )
+                    )
             elif self._is_cooling_mode:
-                commands = [
-                    Command(OverkizCommand.SET_COOLING_ON_OFF, [OverkizCommandParam.ON]),
-                    Command(
-                        OverkizCommand.SET_PASS_APC_COOLING_MODE,
-                        [OverkizCommandParam.MANU],
-                    ),
-                ]
+                if not is_on:
+                    commands.append(
+                        Command(OverkizCommand.SET_COOLING_ON_OFF, [OverkizCommandParam.ON])
+                    )
+                cooling_mode = self.executor.select_state(
+                    OverkizState.IO_PASS_APC_COOLING_MODE
+                )
+                if cooling_mode != OverkizCommandParam.MANU:
+                    commands.append(
+                        Command(
+                            OverkizCommand.SET_PASS_APC_COOLING_MODE,
+                            [OverkizCommandParam.MANU],
+                        )
+                    )
         elif hvac_mode == HVACMode.OFF:
-            if self._is_heating_mode:
-                commands = [
-                    Command(
-                        OverkizCommand.SET_HEATING_ON_OFF, [OverkizCommandParam.OFF]
-                    ),
-                ]
-            elif self._is_cooling_mode:
-                commands = [
-                    Command(
-                        OverkizCommand.SET_COOLING_ON_OFF, [OverkizCommandParam.OFF]
-                    ),
-                ]
+            if self._is_heating_mode and is_on:
+                commands.append(
+                    Command(OverkizCommand.SET_HEATING_ON_OFF, [OverkizCommandParam.OFF])
+                )
+            elif self._is_cooling_mode and is_on:
+                commands.append(
+                    Command(OverkizCommand.SET_COOLING_ON_OFF, [OverkizCommandParam.OFF])
+                )
 
-        if commands:
-            await self.executor.async_execute_commands(commands)
-            await self._async_refresh_modes()
+        if not commands:
+            _LOGGER.debug("Zone %s already in %s, skipping", self.name, hvac_mode)
+            return
+
+        await self.executor.async_execute_commands(commands)
+        await self._async_refresh_modes()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature based on zone control mode."""
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
+            return
+
+        await self.async_refresh_if_stale()
+
+        if temperature == self.target_temperature:
+            _LOGGER.debug("Zone %s already at %.1f°C, skipping", self.name, temperature)
             return
 
         commands: list[Command] = []

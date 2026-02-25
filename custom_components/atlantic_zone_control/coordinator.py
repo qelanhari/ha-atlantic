@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Coroutine
 from datetime import timedelta
 import logging
@@ -67,6 +68,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self.executions: dict[str, dict[str, str]] = {}
         self.areas = self._places_to_area(places) if places else None
         self._default_update_interval = UPDATE_INTERVAL
+        self.last_refresh_time: float = 0
 
         self.is_stateless = all(
             device.protocol in (Protocol.RTS, Protocol.INTERNAL)

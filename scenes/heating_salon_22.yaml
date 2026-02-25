@@ -1,0 +1,6 @@
+- name: Salon 22
+  icon: mdi:sofa
+  entities:
+    climate.zone_control_salon:
+      hvac_mode: auto
+      temperature: 22
