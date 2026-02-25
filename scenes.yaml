@@ -3,13 +3,13 @@
   icon: mdi:bed
   entities:
     climate.zone_control_chambre:
-      hvac_mode: auto
+      state: heat_cool
       temperature: 19
     climate.zone_control_chambre_romy:
-      hvac_mode: auto
+      state: heat_cool
       temperature: 19
     climate.zone_control_chambre_malo:
-      hvac_mode: auto
+      state: heat_cool
       temperature: 19
 
 - id: heating_bedrooms_off
@@ -17,18 +17,18 @@
   icon: mdi:bed-outline
   entities:
     climate.zone_control_chambre:
-      hvac_mode: "off"
+      state: "off"
     climate.zone_control_chambre_romy:
-      hvac_mode: "off"
+      state: "off"
     climate.zone_control_chambre_malo:
-      hvac_mode: "off"
+      state: "off"
 
 - id: heating_salon_19
   name: Salon 19
   icon: mdi:sofa-outline
   entities:
     climate.zone_control_salon:
-      hvac_mode: auto
+      state: heat_cool
       temperature: 19
 
 - id: heating_salon_22
@@ -36,7 +36,7 @@
   icon: mdi:sofa
   entities:
     climate.zone_control_salon:
-      hvac_mode: auto
+      state: heat_cool
       temperature: 22
 
 - id: heating_all_off
@@ -44,12 +44,12 @@
   icon: mdi:radiator-off
   entities:
     climate.zone_control_salon:
-      hvac_mode: "off"
+      state: "off"
     climate.zone_control_chambre:
-      hvac_mode: "off"
+      state: "off"
     climate.zone_control_chambre_romy:
-      hvac_mode: "off"
+      state: "off"
     climate.zone_control_bureau:
-      hvac_mode: "off"
+      state: "off"
     climate.zone_control_chambre_malo:
-      hvac_mode: "off"
+      state: "off"

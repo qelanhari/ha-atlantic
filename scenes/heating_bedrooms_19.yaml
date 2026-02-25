@@ -3,11 +3,11 @@
   icon: mdi:bed
   entities:
     climate.zone_control_chambre:
-      hvac_mode: auto
+      state: heat_cool
       temperature: 19
     climate.zone_control_chambre_romy:
-      hvac_mode: auto
+      state: heat_cool
       temperature: 19
     climate.zone_control_chambre_malo:
-      hvac_mode: auto
+      state: heat_cool
       temperature: 19
