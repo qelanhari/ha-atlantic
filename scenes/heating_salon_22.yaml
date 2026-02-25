@@ -1,5 +1,5 @@
 - id: heating_salon_22
-  name: Salon 22
+  name: Salon 22°C
   icon: mdi:sofa
   entities:
     climate.zone_control_salon:

@@ -1,5 +1,5 @@
 - id: heating_bedrooms_off
-  name: Bedrooms Off
+  name: Chambres Off
   icon: mdi:bed-outline
   entities:
     climate.zone_control_chambre:

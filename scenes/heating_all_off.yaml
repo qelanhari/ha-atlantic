@@ -1,5 +1,5 @@
 - id: heating_all_off
-  name: Heating All Off
+  name: Chauffage Off
   icon: mdi:radiator-off
   entities:
     climate.zone_control_salon:

@@ -1,5 +1,5 @@
 - id: heating_bedrooms_19
-  name: Bedrooms 19
+  name: Chambres 19°C
   icon: mdi:bed
   entities:
     climate.zone_control_chambre:

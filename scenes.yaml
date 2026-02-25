@@ -1,5 +1,5 @@
 - id: heating_bedrooms_19
-  name: Bedrooms 19
+  name: Chambres 19°C
   icon: mdi:bed
   entities:
     climate.zone_control_chambre:
@@ -13,7 +13,7 @@
       temperature: 19
 
 - id: heating_bedrooms_off
-  name: Bedrooms Off
+  name: Chambres Off
   icon: mdi:bed-outline
   entities:
     climate.zone_control_chambre:
@@ -24,7 +24,7 @@
       state: "off"
 
 - id: heating_salon_19
-  name: Salon 19
+  name: Salon 19°C
   icon: mdi:sofa-outline
   entities:
     climate.zone_control_salon:
@@ -32,7 +32,7 @@
       temperature: 19
 
 - id: heating_salon_22
-  name: Salon 22
+  name: Salon 22°C
   icon: mdi:sofa
   entities:
     climate.zone_control_salon:
@@ -40,7 +40,7 @@
       temperature: 22
 
 - id: heating_all_off
-  name: Heating All Off
+  name: Chauffage Off
   icon: mdi:radiator-off
   entities:
     climate.zone_control_salon:
