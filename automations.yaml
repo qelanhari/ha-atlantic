@@ -18,11 +18,22 @@
   alias: "Salon 22°C + Chambres off le matin"
   trigger:
     - platform: time
+      at: "06:00:00"
+      id: rouge
+    - platform: time
       at: "07:00:00"
+      id: normal
   condition:
     - condition: state
       entity_id: input_boolean.presence
       state: "on"
+    - condition: template
+      value_template: >
+        {% if trigger.id == 'rouge' %}
+          {{ is_state('sensor.rte_tempo_couleur_actuelle', 'Rouge') }}
+        {% else %}
+          {{ not is_state('sensor.rte_tempo_couleur_actuelle', 'Rouge') }}
+        {% endif %}
   action:
     - action: climate.set_hvac_mode
       target:
