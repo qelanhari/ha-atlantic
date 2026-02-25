@@ -367,8 +367,9 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
             _LOGGER.debug("Zone %s already in %s, skipping", self.name, hvac_mode)
             return
 
-        await self.executor.async_execute_commands(commands)
-        await self._async_refresh_modes()
+        self.coordinator.queue_commands(
+            self.device_url, commands, post_flush=self._async_refresh_modes
+        )
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature based on zone control mode."""
@@ -398,7 +399,7 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
             )
 
         if commands:
-            await self.executor.async_execute_commands(commands)
+            self.coordinator.queue_commands(self.device_url, commands)
 
     async def _async_refresh_modes(self) -> None:
         """Refresh device modes to get updated states."""

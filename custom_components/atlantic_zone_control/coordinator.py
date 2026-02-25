@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable, Coroutine
 from datetime import timedelta
@@ -13,16 +14,17 @@ from pyoverkiz.client import OverkizClient
 from pyoverkiz.enums import EventName, ExecutionState, Protocol
 from pyoverkiz.exceptions import (
     BadCredentialsException,
+    BaseOverkizException,
     InvalidEventListenerIdException,
     MaintenanceException,
     NotAuthenticatedException,
     TooManyConcurrentRequestsException,
     TooManyRequestsException,
 )
-from pyoverkiz.models import Device, Event, Place
+from pyoverkiz.models import Command, Device, Event, Place
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util.decorator import Registry
@@ -75,6 +77,10 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             for device in devices
             if device.widget not in IGNORED_OVERKIZ_DEVICES
         )
+
+        self._command_queue: dict[str, list[Command]] = {}
+        self._flush_handle: asyncio.TimerHandle | None = None
+        self._post_flush_callbacks: list[Callable[[], Coroutine[Any, Any, None]]] = []
 
     async def _async_update_data(self) -> dict[str, Device]:
         """Fetch Overkiz data via event listener."""
@@ -133,6 +139,52 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
                 areas.update(self._places_to_area(sub_place))
 
         return areas
+
+    def queue_commands(
+        self,
+        device_url: str,
+        commands: list[Command],
+        post_flush: Callable[[], Coroutine[Any, Any, None]] | None = None,
+    ) -> None:
+        """Queue commands for a device, flushing after a short delay."""
+        self._command_queue.setdefault(device_url, []).extend(commands)
+
+        if post_flush is not None and post_flush not in self._post_flush_callbacks:
+            self._post_flush_callbacks.append(post_flush)
+
+        if self._flush_handle is not None:
+            self._flush_handle.cancel()
+
+        self._flush_handle = self.hass.loop.call_later(
+            0.5, lambda: self.hass.async_create_task(self._async_flush_commands())
+        )
+
+    async def _async_flush_commands(self) -> None:
+        """Flush all queued commands, one batch per device."""
+        self._flush_handle = None
+        queue = self._command_queue
+        self._command_queue = {}
+        callbacks = self._post_flush_callbacks
+        self._post_flush_callbacks = []
+
+        for device_url, commands in queue.items():
+            try:
+                exec_id = await self.client.execute_commands(
+                    device_url, commands, "Home Assistant"
+                )
+            except BaseOverkizException as exception:
+                LOGGER.error("Failed to execute batched commands for %s: %s", device_url, exception)
+                continue
+
+            self.executions[exec_id] = {
+                "device_url": device_url,
+                "command_name": commands[0].name if commands else "batch",
+            }
+
+        await self.async_refresh()
+
+        for callback in callbacks:
+            await callback()
 
     def set_update_interval(self, update_interval: timedelta) -> None:
         """Set the update interval and store this value."""
