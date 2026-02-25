@@ -13,7 +13,7 @@ from homeassistant.const import Platform
 DOMAIN: Final = "atlantic_zone_control"
 LOGGER: logging.Logger = logging.getLogger(__package__)
 
-UPDATE_INTERVAL: Final = timedelta(seconds=120)
+UPDATE_INTERVAL: Final = timedelta(seconds=90)
 
 PLATFORMS: list[Platform] = [
     Platform.CLIMATE,
