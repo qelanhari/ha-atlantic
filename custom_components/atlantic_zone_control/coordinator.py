@@ -10,7 +10,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 from aiohttp import ClientConnectorError, ServerDisconnectedError
 from pyoverkiz.client import OverkizClient
-from pyoverkiz.enums import EventName, ExecutionState, OverkizCommand, Protocol
+from pyoverkiz.enums import (
+    EventName,
+    ExecutionState,
+    OverkizCommand,
+    OverkizCommandParam,
+    OverkizState,
+    Protocol,
+)
 from pyoverkiz.exceptions import (
     BadCredentialsException,
     BaseOverkizException,
@@ -270,18 +277,39 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
                 "command_name": commands[0].name if commands else "batch",
             }
 
+    def _get_operating_mode(self, device_url: str) -> str | None:
+        """Return the zone control operating mode from the #1 sibling device."""
+        base_url = device_url.split("#")[0]
+        zone_control_url = f"{base_url}#1"
+        zone_control = self.devices.get(zone_control_url)
+        if zone_control is None:
+            return None
+        state = zone_control.states.get(OverkizState.IO_PASS_APC_OPERATING_MODE)
+        if state is None:
+            return None
+        return cast(str, state.value)
+
     async def _async_refresh_modes(self, device_urls: set[str]) -> None:
         """Refresh mode states for devices, batched into a single API call."""
         await asyncio.sleep(2)
 
-        refresh_commands = [
-            Command(OverkizCommand.REFRESH_PASS_APC_HEATING_MODE, []),
-            Command(OverkizCommand.REFRESH_PASS_APC_HEATING_PROFILE, []),
-            Command(OverkizCommand.REFRESH_PASS_APC_COOLING_MODE, []),
-            Command(OverkizCommand.REFRESH_PASS_APC_COOLING_PROFILE, []),
-            Command(OverkizCommand.REFRESH_TARGET_TEMPERATURE, []),
-        ]
+        sample_url = next(iter(device_urls))
+        operating_mode = self._get_operating_mode(sample_url)
 
+        if operating_mode == OverkizCommandParam.COOLING:
+            refresh_commands = [
+                Command(OverkizCommand.REFRESH_PASS_APC_COOLING_MODE, []),
+                Command(OverkizCommand.REFRESH_PASS_APC_COOLING_PROFILE, []),
+                Command(OverkizCommand.REFRESH_TARGET_TEMPERATURE, []),
+            ]
+        else:
+            refresh_commands = [
+                Command(OverkizCommand.REFRESH_PASS_APC_HEATING_MODE, []),
+                Command(OverkizCommand.REFRESH_PASS_APC_HEATING_PROFILE, []),
+                Command(OverkizCommand.REFRESH_TARGET_TEMPERATURE, []),
+            ]
+
+        LOGGER.debug("Operating mode: %s", operating_mode)
         refresh_queue = {url: list(refresh_commands) for url in device_urls}
 
         LOGGER.debug(
