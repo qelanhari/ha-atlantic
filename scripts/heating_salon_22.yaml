@@ -1,5 +1,5 @@
 alias: Salon 22°
-description: Set Salon to 22°C (only if already on)
+description: Set Salon to 22°C if already on, do nothing if off
 icon: mdi:sofa
 sequence:
   - condition: not
