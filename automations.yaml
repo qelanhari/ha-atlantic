@@ -8,12 +8,14 @@
       entity_id: input_boolean.presence
       state: "on"
   action:
-    - action: switch.turn_on
+    - action: climate.set_temperature
       target:
-        entity_id: switch.salon_19_c
+        entity_id: climate.zone_control_salon
+      data:
+        temperature: 19
 
 - id: heating_salon_22_morning
-  alias: "Salon 22°C le matin"
+  alias: "Salon 22°C + Chambres off le matin"
   trigger:
     - platform: time
       at: "07:00:00"
@@ -22,12 +24,24 @@
       entity_id: input_boolean.presence
       state: "on"
   action:
-    - action: switch.turn_on
+    - action: climate.set_hvac_mode
       target:
-        entity_id: switch.salon_22_c
-    - action: switch.turn_off
+        entity_id: climate.zone_control_salon
+      data:
+        hvac_mode: auto
+    - action: climate.set_temperature
       target:
-        entity_id: switch.chambres_19_c
+        entity_id: climate.zone_control_salon
+      data:
+        temperature: 22
+    - action: climate.set_hvac_mode
+      target:
+        entity_id:
+          - climate.zone_control_chambre
+          - climate.zone_control_chambre_romy
+          - climate.zone_control_chambre_malo
+      data:
+        hvac_mode: "off"
 
 - id: heating_chambres_19_afternoon
   alias: "Chambres 19°C le soir"
@@ -39,6 +53,19 @@
       entity_id: input_boolean.presence
       state: "on"
   action:
-    - action: switch.turn_on
+    - action: climate.set_hvac_mode
       target:
-        entity_id: switch.chambres_19_c
+        entity_id:
+          - climate.zone_control_chambre
+          - climate.zone_control_chambre_romy
+          - climate.zone_control_chambre_malo
+      data:
+        hvac_mode: auto
+    - action: climate.set_temperature
+      target:
+        entity_id:
+          - climate.zone_control_chambre
+          - climate.zone_control_chambre_romy
+          - climate.zone_control_chambre_malo
+      data:
+        temperature: 19
