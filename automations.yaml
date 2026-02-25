@@ -14,8 +14,34 @@
       data:
         temperature: 19
 
+- id: heating_chambres_off_morning
+  alias: "Chambres off le matin (semaine)"
+  trigger:
+    - platform: time
+      at: "06:00:00"
+  condition:
+    - condition: state
+      entity_id: input_boolean.presence
+      state: "on"
+    - condition: time
+      weekday:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+  action:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id:
+          - climate.zone_control_chambre
+          - climate.zone_control_chambre_romy
+          - climate.zone_control_chambre_malo
+      data:
+        hvac_mode: "off"
+
 - id: heating_salon_22_morning
-  alias: "Salon 22°C + Chambres off le matin"
+  alias: "Salon 22°C le matin"
   trigger:
     - platform: time
       at: "07:00:00"
@@ -39,14 +65,6 @@
           {% else %}
             22
           {% endif %}
-    - action: climate.set_hvac_mode
-      target:
-        entity_id:
-          - climate.zone_control_chambre
-          - climate.zone_control_chambre_romy
-          - climate.zone_control_chambre_malo
-      data:
-        hvac_mode: "off"
 
 - id: heating_chambres_19_afternoon
   alias: "Chambres 19°C le soir"
