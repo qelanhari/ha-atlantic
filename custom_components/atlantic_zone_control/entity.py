@@ -30,8 +30,9 @@ class OverkizEntity(CoordinatorEntity[OverkizDataUpdateCoordinator]):
         self.device_url = device_url
         split_device_url = self.device_url.split("#")
         self.base_device_url = split_device_url[0]
-        if len(split_device_url) == 2:
-            self.index_device_url = split_device_url[1]
+        self.index_device_url: str | None = (
+            split_device_url[1] if len(split_device_url) == 2 else None
+        )
         self.executor = OverkizExecutor(device_url, coordinator)
 
         self._attr_assumed_state = not self.device.states

@@ -120,4 +120,5 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: AtlanticZoneControlConfigEntry
 ) -> bool:
     """Unload a config entry."""
+    entry.runtime_data.coordinator.cancel_pending_flush()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable, Coroutine
 from datetime import timedelta
 import logging
@@ -30,8 +29,9 @@ from pyoverkiz.exceptions import (
 from pyoverkiz.models import Command, Device, Event, Place
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util.decorator import Registry
 
@@ -46,7 +46,13 @@ EVENT_HANDLERS: Registry[
 
 
 class OverkizBatchExecutor:
-    """Executes commands across multiple devices in a single API call."""
+    """Executes commands across multiple devices in a single API call.
+
+    Uses pyoverkiz's internal __post method to call exec/apply with multi-device
+    actions. This is not part of the public API — pinned to pyoverkiz==1.20.0.
+    If __post is unavailable, supports_multi_device returns False and the
+    coordinator falls back to per-device execution.
+    """
 
     def __init__(self, client: OverkizClient) -> None:
         """Initialize the batch executor."""
@@ -111,7 +117,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         )
 
         self._command_queue: dict[str, list[Command]] = {}
-        self._flush_handle: asyncio.TimerHandle | None = None
+        self._flush_unsub: Callable[[], None] | None = None
         self._refresh_device_urls: set[str] = set()
         self._batch_executor = OverkizBatchExecutor(client)
 
@@ -191,16 +197,20 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         if needs_mode_refresh:
             self._refresh_device_urls.add(device_url)
 
-        if self._flush_handle is not None:
-            self._flush_handle.cancel()
+        if self._flush_unsub is not None:
+            self._flush_unsub()
 
-        self._flush_handle = self.hass.loop.call_later(
-            0.5, lambda: self.hass.async_create_task(self._async_flush_commands())
+        self._flush_unsub = async_call_later(
+            self.hass, 0.5, self._async_flush_commands_callback
         )
+
+    async def _async_flush_commands_callback(self, _now: Any = None) -> None:
+        """Callback wrapper for async_call_later."""
+        await self._async_flush_commands()
 
     async def _async_flush_commands(self) -> None:
         """Flush all queued commands, using a single API call when possible."""
-        self._flush_handle = None
+        self._flush_unsub = None
         queue = self._command_queue
         self._command_queue = {}
         refresh_urls = self._refresh_device_urls
@@ -232,11 +242,10 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
                     exec_id,
                     len(queue),
                 )
-                for device_url in queue:
-                    self.executions[exec_id] = {
-                        "device_url": device_url,
-                        "command_name": "multi-device-batch",
-                    }
+                self.executions[exec_id] = {
+                    "device_url": ",".join(queue.keys()),
+                    "command_name": "multi-device-batch",
+                }
             else:
                 LOGGER.debug("Multi-device batch failed, falling back to per-device")
                 await self._execute_per_device(queue)
@@ -247,7 +256,11 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         await self.async_refresh()
 
         if refresh_urls:
-            await self._async_refresh_modes(refresh_urls)
+            async_call_later(
+                self.hass, 2, lambda _now: self.hass.async_create_task(
+                    self._async_refresh_modes(refresh_urls)
+                )
+            )
 
     async def _execute_per_device(
         self, queue: dict[str, list[Command]]
@@ -291,8 +304,6 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
 
     async def _async_refresh_modes(self, device_urls: set[str]) -> None:
         """Refresh mode states for devices, batched into a single API call."""
-        await asyncio.sleep(2)
-
         sample_url = next(iter(device_urls))
         operating_mode = self._get_operating_mode(sample_url)
 
@@ -341,6 +352,12 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
 
         await self._execute_per_device(refresh_queue)
 
+    def cancel_pending_flush(self) -> None:
+        """Cancel any pending flush timer."""
+        if self._flush_unsub is not None:
+            self._flush_unsub()
+            self._flush_unsub = None
+
     def set_update_interval(self, update_interval: timedelta) -> None:
         """Set the update interval and store this value."""
         self.update_interval = update_interval
@@ -352,7 +369,7 @@ async def on_device_available(
     coordinator: OverkizDataUpdateCoordinator, event: Event
 ) -> None:
     """Handle device available event."""
-    if event.device_url:
+    if event.device_url and event.device_url in coordinator.devices:
         coordinator.devices[event.device_url].available = True
 
 
@@ -362,7 +379,7 @@ async def on_device_unavailable_disabled(
     coordinator: OverkizDataUpdateCoordinator, event: Event
 ) -> None:
     """Handle device unavailable / disabled event."""
-    if event.device_url:
+    if event.device_url and event.device_url in coordinator.devices:
         coordinator.devices[event.device_url].available = False
 
 
@@ -385,8 +402,11 @@ async def on_device_state_changed(
     if not event.device_url:
         return
 
+    device = coordinator.devices.get(event.device_url)
+    if device is None:
+        return
+
     for state in event.device_states:
-        device = coordinator.devices[event.device_url]
         device.states[state.name] = state
 
 
@@ -406,7 +426,7 @@ async def on_device_removed(
     ):
         registry.async_remove_device(registered_device.id)
 
-    if event.device_url:
+    if event.device_url and event.device_url in coordinator.devices:
         del coordinator.devices[event.device_url]
 
 

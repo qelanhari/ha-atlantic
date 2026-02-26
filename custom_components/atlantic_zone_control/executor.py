@@ -2,25 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
 from urllib.parse import urlparse
 
-from pyoverkiz.enums import OverkizCommand, Protocol
-from pyoverkiz.exceptions import BaseOverkizException
-from pyoverkiz.models import Command, Device, StateDefinition
+from pyoverkiz.models import Device
 from pyoverkiz.types import StateType as OverkizStateType
 
-from homeassistant.exceptions import HomeAssistantError
-
 from .coordinator import OverkizDataUpdateCoordinator
-
-COMMANDS_WITHOUT_DELAY = [
-    OverkizCommand.IDENTIFY,
-    OverkizCommand.OFF,
-    OverkizCommand.ON,
-    OverkizCommand.ON_WITH_TIMER,
-    OverkizCommand.TEST,
-]
 
 
 class OverkizExecutor:
@@ -71,94 +58,6 @@ class OverkizExecutor:
                 return current_attribute.value
 
         return None
-
-    async def async_execute_command(
-        self, command_name: str, *args: Any, refresh_afterwards: bool = True
-    ) -> None:
-        """Execute device command in async context."""
-        parameters = [arg for arg in args if arg is not None]
-        if (
-            self.device.protocol == Protocol.RTS
-            and command_name not in COMMANDS_WITHOUT_DELAY
-        ):
-            parameters.append(0)
-
-        try:
-            exec_id = await self.coordinator.client.execute_command(
-                self.device.device_url,
-                Command(command_name, parameters),
-                "Home Assistant",
-            )
-        except BaseOverkizException as exception:
-            raise HomeAssistantError(exception) from exception
-
-        self.coordinator.executions[exec_id] = {
-            "device_url": self.device.device_url,
-            "command_name": command_name,
-        }
-        if refresh_afterwards:
-            await self.coordinator.async_refresh()
-
-    async def async_execute_commands(
-        self, commands: list[Command], refresh_afterwards: bool = True
-    ) -> None:
-        """Execute multiple device commands in a single batched API call."""
-        try:
-            exec_id = await self.coordinator.client.execute_commands(
-                self.device.device_url,
-                commands,
-                "Home Assistant",
-            )
-        except BaseOverkizException as exception:
-            raise HomeAssistantError(exception) from exception
-
-        self.coordinator.executions[exec_id] = {
-            "device_url": self.device.device_url,
-            "command_name": commands[0].name if commands else "batch",
-        }
-        if refresh_afterwards:
-            await self.coordinator.async_refresh()
-
-    async def async_cancel_command(
-        self, commands_to_cancel: list[OverkizCommand]
-    ) -> bool:
-        """Cancel running execution by command."""
-        exec_id = next(
-            (
-                exec_id
-                for exec_id, execution in reversed(self.coordinator.executions.items())
-                if execution.get("device_url") == self.device.device_url
-                and execution.get("command_name") in commands_to_cancel
-            ),
-            None,
-        )
-
-        if exec_id:
-            await self.async_cancel_execution(exec_id)
-            return True
-
-        executions = cast(Any, await self.coordinator.client.get_current_executions())
-        exec_id = next(
-            (
-                execution.id
-                for execution in executions
-                for action in reversed(execution.action_group.get("actions"))
-                for command in action.get("commands")
-                if action.get("device_url") == self.device.device_url
-                and command.get("name") in commands_to_cancel
-            ),
-            None,
-        )
-
-        if exec_id:
-            await self.async_cancel_execution(exec_id)
-            return True
-
-        return False
-
-    async def async_cancel_execution(self, exec_id: str) -> None:
-        """Cancel running execution via execution id."""
-        await self.coordinator.client.cancel_command(exec_id)
 
     def get_gateway_id(self) -> str:
         """Retrieve gateway id from device url."""

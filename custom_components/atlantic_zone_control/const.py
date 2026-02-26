@@ -26,8 +26,3 @@ ATLANTIC_WIDGET_TO_PLATFORM: dict[UIWidget, Platform] = {
     UIWidget.ATLANTIC_PASS_APC_ZONE_CONTROL: Platform.CLIMATE,
     UIWidget.ATLANTIC_PASS_APC_HEATING_AND_COOLING_ZONE: Platform.CLIMATE,
 }
-
-# Widgets to keep in coordinator data for sensor lookups (not as entities)
-ATLANTIC_SENSOR_WIDGETS: set[str] = {
-    "TemperatureSensor",
-}

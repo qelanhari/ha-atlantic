@@ -14,8 +14,7 @@ from homeassistant.components.climate import (
     HVACAction,
     HVACMode,
 )
-from homeassistant.const import ATTR_TEMPERATURE, PRECISION_HALVES, UnitOfTemperature
-from homeassistant.const import Platform
+from homeassistant.const import ATTR_TEMPERATURE, PRECISION_HALVES, Platform, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -212,7 +211,7 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
         if self.index_device_url:
             sensor_index = int(self.index_device_url) + 1
             if sensor_device := self.executor.linked_device(sensor_index):
-                if temp_state := sensor_device.states[OverkizState.CORE_TEMPERATURE]:
+                if temp_state := sensor_device.states.get(OverkizState.CORE_TEMPERATURE):
                     return cast(float, temp_state.value)
         return None
 

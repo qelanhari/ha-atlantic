@@ -92,3 +92,59 @@ class AtlanticZoneControlConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """Handle reauthentication when credentials become invalid."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reauth credential input."""
+        errors: dict[str, str] = {}
+
+        if user_input:
+            session = async_create_clientsession(self.hass)
+            client = OverkizClient(
+                username=user_input[CONF_USERNAME],
+                password=user_input[CONF_PASSWORD],
+                server=SUPPORTED_SERVERS[SERVER],
+                session=session,
+            )
+
+            try:
+                await client.login(register_event_listener=False)
+            except (BadCredentialsException, NotAuthenticatedException):
+                errors["base"] = "invalid_auth"
+            except (TimeoutError, ClientError):
+                errors["base"] = "cannot_connect"
+            except TooManyRequestsException:
+                errors["base"] = "too_many_requests"
+            except Exception:  # noqa: BLE001
+                errors["base"] = "unknown"
+                LOGGER.exception("Unknown error during reauth")
+            else:
+                return self.async_update_reload_and_abort(
+                    self._get_reauth_entry(),
+                    data={
+                        CONF_USERNAME: user_input[CONF_USERNAME],
+                        CONF_PASSWORD: user_input[CONF_PASSWORD],
+                    },
+                )
+
+        reauth_entry = self._get_reauth_entry()
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_USERNAME,
+                        default=reauth_entry.data.get(CONF_USERNAME),
+                    ): str,
+                    vol.Required(CONF_PASSWORD): str,
+                }
+            ),
+            errors=errors,
+        )
