@@ -201,7 +201,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             self._flush_unsub()
 
         self._flush_unsub = async_call_later(
-            self.hass, 0.5, self._async_flush_commands_callback
+            self.hass, 2, self._async_flush_commands_callback
         )
 
     async def _async_flush_commands_callback(self, _now: Any = None) -> None:
