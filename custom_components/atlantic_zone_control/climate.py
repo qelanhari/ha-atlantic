@@ -128,11 +128,10 @@ class AtlanticPassAPCZoneControl(OverkizEntity, ClimateEntity):
         return self._real_hvac_mode
 
     def _handle_coordinator_update(self) -> None:
-        """Clear optimistic state when device has no pending work."""
+        """Clear optimistic state when real state confirms or command failed."""
         if self._optimistic_hvac_mode is not None:
-            if self._real_hvac_mode == self._optimistic_hvac_mode:
-                self._optimistic_hvac_mode = None
-            elif not self.coordinator.executions and self.device_url not in self.coordinator._command_queue:
+            real = self._real_hvac_mode
+            if real == self._optimistic_hvac_mode:
                 self._optimistic_hvac_mode = None
         super()._handle_coordinator_update()
 
@@ -295,16 +294,12 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
         return self._real_hvac_mode
 
     def _handle_coordinator_update(self) -> None:
-        """Clear optimistic state when device has no pending work."""
-        has_pending_work = (
-            bool(self.coordinator.executions)
-            or self.device_url in self.coordinator._command_queue
-        )
+        """Clear optimistic state when real state confirms the change."""
         if self._optimistic_hvac_mode is not None:
-            if self._real_hvac_mode == self._optimistic_hvac_mode or not has_pending_work:
+            if self._real_hvac_mode == self._optimistic_hvac_mode:
                 self._optimistic_hvac_mode = None
         if self._optimistic_temperature is not None:
-            if self._real_target_temperature == self._optimistic_temperature or not has_pending_work:
+            if self._real_target_temperature == self._optimistic_temperature:
                 self._optimistic_temperature = None
         super()._handle_coordinator_update()
 
@@ -451,4 +446,3 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
             self._optimistic_temperature = temperature
             self.async_write_ha_state()
             self.coordinator.queue_commands(self.device_url, commands)
-
