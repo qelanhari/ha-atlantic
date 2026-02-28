@@ -200,6 +200,10 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         if self._flush_unsub is not None:
             self._flush_unsub()
 
+        # Start fast-polling immediately so we pick up state changes sooner
+        if not self.is_stateless:
+            self.update_interval = timedelta(seconds=2)
+
         self._flush_unsub = async_call_later(
             self.hass, 2, self._async_flush_commands_callback
         )

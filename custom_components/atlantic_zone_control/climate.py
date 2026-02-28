@@ -84,6 +84,7 @@ class AtlanticPassAPCZoneControl(OverkizEntity, ClimateEntity):
     ) -> None:
         """Init method."""
         super().__init__(device_url, coordinator)
+        self._optimistic_hvac_mode: HVACMode | None = None
 
         self._attr_hvac_modes = [*HVAC_MODE_TO_OVERKIZ]
 
@@ -98,8 +99,8 @@ class AtlanticPassAPCZoneControl(OverkizEntity, ClimateEntity):
         ) and self.executor.has_state(OverkizState.CORE_HEATING_COOLING_AUTO_SWITCH)
 
     @property
-    def hvac_mode(self) -> HVACMode:
-        """Return hvac operation ie. heat, cool mode."""
+    def _real_hvac_mode(self) -> HVACMode:
+        """Return the actual hvac mode from device state."""
         if (
             self._is_auto_available
             and cast(
@@ -119,11 +120,27 @@ class AtlanticPassAPCZoneControl(OverkizEntity, ClimateEntity):
             )
         ]
 
+    @property
+    def hvac_mode(self) -> HVACMode:
+        """Return hvac operation ie. heat, cool mode."""
+        if self._optimistic_hvac_mode is not None:
+            return self._optimistic_hvac_mode
+        return self._real_hvac_mode
+
+    def _handle_coordinator_update(self) -> None:
+        """Clear optimistic state when device has no pending work."""
+        if self._optimistic_hvac_mode is not None:
+            if self._real_hvac_mode == self._optimistic_hvac_mode:
+                self._optimistic_hvac_mode = None
+            elif not self.coordinator.executions and self.device_url not in self.coordinator._command_queue:
+                self._optimistic_hvac_mode = None
+        super()._handle_coordinator_update()
+
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
         await self.async_refresh_if_stale()
 
-        if hvac_mode == self.hvac_mode:
+        if hvac_mode == self._real_hvac_mode:
             _LOGGER.debug("Zone control already in %s, skipping", hvac_mode)
             return
 
@@ -148,6 +165,8 @@ class AtlanticPassAPCZoneControl(OverkizEntity, ClimateEntity):
             )
 
         if commands:
+            self._optimistic_hvac_mode = hvac_mode
+            self.async_write_ha_state()
             self.coordinator.queue_commands(self.device_url, commands)
 
 
@@ -169,6 +188,8 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
     ) -> None:
         """Init method."""
         super().__init__(device_url, coordinator)
+        self._optimistic_hvac_mode: HVACMode | None = None
+        self._optimistic_temperature: float | None = None
 
         self._zone_control_executor: OverkizExecutor | None = None
 
@@ -216,8 +237,8 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
         return None
 
     @property
-    def target_temperature(self) -> float | None:
-        """Return target temperature based on zone control mode."""
+    def _real_target_temperature(self) -> float | None:
+        """Return the actual target temperature from device state."""
         if self._is_cooling_mode:
             return cast(
                 float,
@@ -237,8 +258,15 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
         return None
 
     @property
-    def hvac_mode(self) -> HVACMode:
-        """Return hvac mode: AUTO if on, OFF if off."""
+    def target_temperature(self) -> float | None:
+        """Return target temperature based on zone control mode."""
+        if self._optimistic_temperature is not None:
+            return self._optimistic_temperature
+        return self._real_target_temperature
+
+    @property
+    def _real_hvac_mode(self) -> HVACMode:
+        """Return the actual hvac mode from device state."""
         if self._is_heating_mode:
             heating_state = cast(
                 str,
@@ -258,6 +286,27 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
             return HVACMode.OFF
 
         return HVACMode.OFF
+
+    @property
+    def hvac_mode(self) -> HVACMode:
+        """Return hvac mode: AUTO if on, OFF if off."""
+        if self._optimistic_hvac_mode is not None:
+            return self._optimistic_hvac_mode
+        return self._real_hvac_mode
+
+    def _handle_coordinator_update(self) -> None:
+        """Clear optimistic state when device has no pending work."""
+        has_pending_work = (
+            bool(self.coordinator.executions)
+            or self.device_url in self.coordinator._command_queue
+        )
+        if self._optimistic_hvac_mode is not None:
+            if self._real_hvac_mode == self._optimistic_hvac_mode or not has_pending_work:
+                self._optimistic_hvac_mode = None
+        if self._optimistic_temperature is not None:
+            if self._real_target_temperature == self._optimistic_temperature or not has_pending_work:
+                self._optimistic_temperature = None
+        super()._handle_coordinator_update()
 
     @property
     def hvac_action(self) -> HVACAction | None:
@@ -318,7 +367,7 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
         await self.async_refresh_if_stale()
 
         commands: list[Command] = []
-        is_on = self.hvac_mode == HVACMode.AUTO
+        is_on = self._real_hvac_mode == HVACMode.AUTO
 
         if hvac_mode == HVACMode.AUTO:
             if self._is_heating_mode:
@@ -365,6 +414,8 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
             _LOGGER.debug("Zone %s already in %s, skipping", self.name, hvac_mode)
             return
 
+        self._optimistic_hvac_mode = hvac_mode
+        self.async_write_ha_state()
         self.coordinator.queue_commands(
             self.device_url, commands, needs_mode_refresh=True
         )
@@ -377,7 +428,7 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
 
         await self.async_refresh_if_stale()
 
-        if temperature == self.target_temperature:
+        if temperature == self._real_target_temperature:
             _LOGGER.debug("Zone %s already at %.1f°C, skipping", self.name, temperature)
             return
 
@@ -397,5 +448,7 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
             )
 
         if commands:
+            self._optimistic_temperature = temperature
+            self.async_write_ha_state()
             self.coordinator.queue_commands(self.device_url, commands)
 
