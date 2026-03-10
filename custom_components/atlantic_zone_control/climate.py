@@ -137,9 +137,10 @@ class AtlanticPassAPCZoneControl(OverkizEntity, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
-        await self.async_refresh_if_stale()
+        if not self.coordinator.has_pending_commands(self.device_url):
+            await self.async_refresh_if_stale()
 
-        if hvac_mode == self._real_hvac_mode:
+        if hvac_mode == self.hvac_mode:
             _LOGGER.debug("Zone control already in %s, skipping", hvac_mode)
             return
 
@@ -359,7 +360,8 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode (AUTO=on+manual, OFF=off)."""
-        await self.async_refresh_if_stale()
+        if not self.coordinator.has_pending_commands(self.device_url):
+            await self.async_refresh_if_stale()
 
         commands: list[Command] = []
         is_on = self._real_hvac_mode == HVACMode.AUTO
@@ -421,9 +423,11 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
         if temperature is None:
             return
 
-        await self.async_refresh_if_stale()
+        if not self.coordinator.has_pending_commands(self.device_url):
+            await self.async_refresh_if_stale()
 
-        if temperature == self._real_target_temperature:
+        current = self._optimistic_temperature if self._optimistic_temperature is not None else self._real_target_temperature
+        if temperature == current:
             _LOGGER.debug("Zone %s already at %.1f°C, skipping", self.name, temperature)
             return
 

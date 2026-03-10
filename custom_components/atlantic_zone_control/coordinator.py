@@ -179,6 +179,10 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
 
         return areas
 
+    def has_pending_commands(self, device_url: str) -> bool:
+        """Return True if there are queued commands for a device."""
+        return bool(self._command_queue.get(device_url))
+
     def queue_commands(
         self,
         device_url: str,
