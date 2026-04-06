@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
@@ -28,7 +28,7 @@ from pyoverkiz.exceptions import (
 )
 from pyoverkiz.models import Command, Device, Event, Place
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_call_later
@@ -265,9 +265,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
 
         if refresh_urls:
             async_call_later(
-                self.hass, 2, lambda _now: self.hass.async_create_task(
-                    self._async_refresh_modes(refresh_urls)
-                )
+                self.hass, 2, self._make_refresh_modes_callback(refresh_urls)
             )
 
     async def _execute_per_device(
@@ -309,6 +307,20 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         if state is None:
             return None
         return cast(str, state.value)
+
+    @callback
+    def _make_refresh_modes_callback(
+        self, refresh_urls: set[str]
+    ) -> Callable[[datetime], None]:
+        """Create a callback that schedules a mode refresh."""
+
+        @callback
+        def _refresh_callback(_now: datetime) -> None:
+            self.hass.async_create_task(
+                self._async_refresh_modes(refresh_urls)
+            )
+
+        return _refresh_callback
 
     async def _async_refresh_modes(self, device_urls: set[str]) -> None:
         """Refresh mode states for devices, batched into a single API call."""
