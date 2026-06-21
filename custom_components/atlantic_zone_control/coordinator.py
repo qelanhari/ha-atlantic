@@ -49,7 +49,7 @@ class OverkizBatchExecutor:
     """Executes commands across multiple devices in a single API call.
 
     Uses pyoverkiz's internal __post method to call exec/apply with multi-device
-    actions. This is not part of the public API — pinned to pyoverkiz==1.20.0.
+    actions. This is not part of the public API — pinned to pyoverkiz==1.20.4.
     If __post is unavailable, supports_multi_device returns False and the
     coordinator falls back to per-device execution.
     """
