@@ -6,6 +6,6 @@
   "dependencies": [],
   "documentation": "",
   "iot_class": "cloud_polling",
-  "requirements": ["pyoverkiz==1.20.0"],
-  "version": "1.2.3"
+  "requirements": ["pyoverkiz==1.20.4"],
+  "version": "1.2.4"
 }
