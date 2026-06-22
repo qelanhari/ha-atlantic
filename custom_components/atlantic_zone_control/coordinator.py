@@ -18,15 +18,15 @@ from pyoverkiz.enums import (
     Protocol,
 )
 from pyoverkiz.exceptions import (
-    BadCredentialsException,
-    BaseOverkizException,
-    InvalidEventListenerIdException,
-    MaintenanceException,
-    NotAuthenticatedException,
-    TooManyConcurrentRequestsException,
-    TooManyRequestsException,
+    BadCredentialsError,
+    BaseOverkizError,
+    InvalidEventListenerIdError,
+    MaintenanceError,
+    NotAuthenticatedError,
+    TooManyConcurrentRequestsError,
+    TooManyRequestsError,
 )
-from pyoverkiz.models import Command, Device, Event, Place
+from pyoverkiz.models import Action, Command, Device, Event, Place
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -48,33 +48,25 @@ EVENT_HANDLERS: Registry[
 class OverkizBatchExecutor:
     """Executes commands across multiple devices in a single API call.
 
-    Uses pyoverkiz's internal __post method to call exec/apply with multi-device
-    actions. This is not part of the public API — pinned to pyoverkiz==1.20.0.
-    If __post is unavailable, supports_multi_device returns False and the
-    coordinator falls back to per-device execution.
+    Wraps the public OverkizClient.execute_action_group API, which accepts a
+    list of per-device Action objects and applies them in one execution.
     """
 
     def __init__(self, client: OverkizClient) -> None:
         """Initialize the batch executor."""
         self._client = client
-        self._post = getattr(client, "_OverkizClient__post", None)
-
-    @property
-    def supports_multi_device(self) -> bool:
-        """Return True if the client exposes the internal __post method."""
-        return self._post is not None
 
     async def execute_multi(
         self,
-        actions: list[dict[str, Any]],
+        queue: dict[str, list[Command]],
         label: str = "Home Assistant",
-    ) -> str | None:
-        """Execute a multi-device batch. Returns exec_id or None on failure."""
-        if not self._post:
-            return None
-        payload = {"label": label, "actions": actions}
-        response = await self._post("exec/apply", payload)
-        return cast(str, response["execId"])
+    ) -> str:
+        """Execute a multi-device batch. Returns the exec_id."""
+        actions = [
+            Action(device_url=device_url, commands=commands)
+            for device_url, commands in queue.items()
+        ]
+        return await self._client.execute_action_group(label=label, actions=actions)
 
 
 class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
@@ -111,7 +103,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self.last_refresh_time: float = 0
 
         self.is_stateless = all(
-            device.protocol in (Protocol.RTS, Protocol.INTERNAL)
+            device.identifier.protocol in (Protocol.RTS, Protocol.INTERNAL)
             for device in devices
             if device.widget not in IGNORED_OVERKIZ_DEVICES
         )
@@ -125,15 +117,15 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         """Fetch Overkiz data via event listener."""
         try:
             events = await self.client.fetch_events()
-        except (BadCredentialsException, NotAuthenticatedException) as exception:
+        except (BadCredentialsError, NotAuthenticatedError) as exception:
             raise ConfigEntryAuthFailed("Invalid authentication.") from exception
-        except TooManyConcurrentRequestsException as exception:
+        except TooManyConcurrentRequestsError as exception:
             raise UpdateFailed("Too many concurrent requests.") from exception
-        except TooManyRequestsException as exception:
+        except TooManyRequestsError as exception:
             raise UpdateFailed("Too many requests, try again later.") from exception
-        except MaintenanceException as exception:
+        except MaintenanceError as exception:
             raise UpdateFailed("Server is down for maintenance.") from exception
-        except InvalidEventListenerIdException as exception:
+        except InvalidEventListenerIdError as exception:
             raise UpdateFailed(exception) from exception
         except (TimeoutError, ClientConnectorError) as exception:
             LOGGER.debug("Failed to connect", exc_info=True)
@@ -144,9 +136,9 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             try:
                 await self.client.login()
                 self.devices = await self._get_devices()
-            except (BadCredentialsException, NotAuthenticatedException) as exception:
+            except (BadCredentialsError, NotAuthenticatedError) as exception:
                 raise ConfigEntryAuthFailed("Invalid authentication.") from exception
-            except TooManyRequestsException as exception:
+            except TooManyRequestsError as exception:
                 raise UpdateFailed("Too many requests, try again later.") from exception
 
             return self.devices
@@ -233,14 +225,10 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             {url: [c.name for c in cmds] for url, cmds in queue.items()},
         )
 
-        if self._batch_executor.supports_multi_device and len(queue) > 1:
-            actions = [
-                {"deviceURL": url, "commands": cmds}
-                for url, cmds in queue.items()
-            ]
+        if len(queue) > 1:
             try:
-                exec_id = await self._batch_executor.execute_multi(actions)
-            except BaseOverkizException as exception:
+                exec_id = await self._batch_executor.execute_multi(queue)
+            except BaseOverkizError as exception:
                 LOGGER.error("Multi-device batch failed: %s", exception)
                 exec_id = None
 
@@ -258,7 +246,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
                 LOGGER.debug("Multi-device batch failed, falling back to per-device")
                 await self._execute_per_device(queue)
         else:
-            LOGGER.debug("Using per-device execution (single device or adapter unavailable)")
+            LOGGER.debug("Using per-device execution (single device)")
             await self._execute_per_device(queue)
 
         await self.async_refresh()
@@ -280,10 +268,11 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
                 [c.name for c in commands],
             )
             try:
-                exec_id = await self.client.execute_commands(
-                    device_url, commands, "Home Assistant"
+                exec_id = await self.client.execute_action_group(
+                    label="Home Assistant",
+                    actions=[Action(device_url=device_url, commands=commands)],
                 )
-            except BaseOverkizException as exception:
+            except BaseOverkizError as exception:
                 LOGGER.error(
                     "Failed to execute batched commands for %s: %s",
                     device_url,
@@ -349,14 +338,10 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             list(device_urls),
         )
 
-        if self._batch_executor.supports_multi_device and len(refresh_queue) > 1:
-            actions = [
-                {"deviceURL": url, "commands": cmds}
-                for url, cmds in refresh_queue.items()
-            ]
+        if len(refresh_queue) > 1:
             try:
-                exec_id = await self._batch_executor.execute_multi(actions)
-            except BaseOverkizException as exception:
+                exec_id = await self._batch_executor.execute_multi(refresh_queue)
+            except BaseOverkizError as exception:
                 LOGGER.error("Batch mode refresh failed: %s", exception)
                 exec_id = None
 

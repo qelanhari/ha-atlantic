@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Custom Home Assistant integration for the **Atlantic Zone Control 2.0** (Pass APC) heat pump, connected via a **Somfy TaHoma Switch**. Communicates with the Overkiz cloud API using `pyoverkiz==1.20.0` (pinned for batch execution support via internal `__post` method).
+Custom Home Assistant integration for the **Atlantic Zone Control 2.0** (Pass APC) heat pump, connected via a **Somfy TaHoma Switch**. Communicates with the Overkiz cloud API using `pyoverkiz==2.0.2` (matching HA core's Overkiz integration in HA ≥ 2026.7.0; requires that HA version). Multi-device batching uses the public `OverkizClient.execute_action_group(actions=[Action(...)])` API.
 
 Distributed via HACS. Source lives entirely in `custom_components/atlantic_zone_control/`.
 

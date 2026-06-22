@@ -6,14 +6,14 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from aiohttp import ClientError
+from pyoverkiz.auth.credentials import UsernamePasswordCredentials
 from pyoverkiz.client import OverkizClient
-from pyoverkiz.const import SUPPORTED_SERVERS
 from pyoverkiz.enums import Server, UIWidget
 from pyoverkiz.exceptions import (
-    BadCredentialsException,
-    MaintenanceException,
-    NotAuthenticatedException,
-    TooManyRequestsException,
+    BadCredentialsError,
+    MaintenanceError,
+    NotAuthenticatedError,
+    TooManyRequestsError,
 )
 from pyoverkiz.models import Device
 
@@ -45,22 +45,23 @@ async def async_setup_entry(
     """Set up Atlantic Zone Control from a config entry."""
     session = async_create_clientsession(hass)
     client = OverkizClient(
-        username=entry.data[CONF_USERNAME],
-        password=entry.data[CONF_PASSWORD],
-        server=SUPPORTED_SERVERS[Server.SOMFY_EUROPE],
+        server=Server.SOMFY_EUROPE,
+        credentials=UsernamePasswordCredentials(
+            entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD]
+        ),
         session=session,
     )
 
     try:
         await client.login()
         setup = await client.get_setup()
-    except (BadCredentialsException, NotAuthenticatedException) as exception:
+    except (BadCredentialsError, NotAuthenticatedError) as exception:
         raise ConfigEntryAuthFailed("Invalid authentication") from exception
-    except TooManyRequestsException as exception:
+    except TooManyRequestsError as exception:
         raise ConfigEntryNotReady("Too many requests, try again later") from exception
     except (TimeoutError, ClientError) as exception:
         raise ConfigEntryNotReady("Failed to connect") from exception
-    except MaintenanceException as exception:
+    except MaintenanceError as exception:
         raise ConfigEntryNotReady("Server is down for maintenance") from exception
 
     # Keep all devices in coordinator (including sensors for linked_device lookups)
@@ -102,13 +103,13 @@ async def async_setup_entry(
             identifiers={(DOMAIN, gateway.id)},
             model=gateway.type.beautify_name if gateway.type else None,
             model_id=str(gateway.type),
-            manufacturer=client.server.manufacturer,
+            manufacturer=client.server_config.manufacturer,
             name=gateway.type.beautify_name if gateway.type else gateway.id,
             sw_version=gateway.connectivity.protocol_version,
             hw_version=f"{gateway.type}:{gateway.sub_type}"
             if gateway.type and gateway.sub_type
             else None,
-            configuration_url=client.server.configuration_url,
+            configuration_url=client.server_config.configuration_url,
         )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

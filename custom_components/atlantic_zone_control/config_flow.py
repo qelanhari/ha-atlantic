@@ -5,15 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from aiohttp import ClientError
+from pyoverkiz.auth.credentials import UsernamePasswordCredentials
 from pyoverkiz.client import OverkizClient
-from pyoverkiz.const import SUPPORTED_SERVERS
 from pyoverkiz.enums import Server
 from pyoverkiz.exceptions import (
-    BadCredentialsException,
-    MaintenanceException,
-    NotAuthenticatedException,
-    TooManyAttemptsBannedException,
-    TooManyRequestsException,
+    BadCredentialsError,
+    MaintenanceError,
+    NotAuthenticatedError,
+    TooManyAttemptsBannedError,
+    TooManyRequestsError,
 )
 from pyoverkiz.utils import is_overkiz_gateway
 import voluptuous as vol
@@ -41,9 +41,10 @@ class AtlanticZoneControlConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input:
             session = async_create_clientsession(self.hass)
             client = OverkizClient(
-                username=user_input[CONF_USERNAME],
-                password=user_input[CONF_PASSWORD],
-                server=SUPPORTED_SERVERS[SERVER],
+                server=SERVER,
+                credentials=UsernamePasswordCredentials(
+                    user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
+                ),
                 session=session,
             )
 
@@ -58,15 +59,15 @@ class AtlanticZoneControlConfigFlow(ConfigFlow, domain=DOMAIN):
                             )
                             break
 
-            except TooManyRequestsException:
+            except TooManyRequestsError:
                 errors["base"] = "too_many_requests"
-            except (BadCredentialsException, NotAuthenticatedException):
+            except (BadCredentialsError, NotAuthenticatedError):
                 errors["base"] = "invalid_auth"
             except (TimeoutError, ClientError):
                 errors["base"] = "cannot_connect"
-            except MaintenanceException:
+            except MaintenanceError:
                 errors["base"] = "server_in_maintenance"
-            except TooManyAttemptsBannedException:
+            except TooManyAttemptsBannedError:
                 errors["base"] = "too_many_attempts"
             except Exception:  # noqa: BLE001
                 errors["base"] = "unknown"
@@ -108,19 +109,20 @@ class AtlanticZoneControlConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input:
             session = async_create_clientsession(self.hass)
             client = OverkizClient(
-                username=user_input[CONF_USERNAME],
-                password=user_input[CONF_PASSWORD],
-                server=SUPPORTED_SERVERS[SERVER],
+                server=SERVER,
+                credentials=UsernamePasswordCredentials(
+                    user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
+                ),
                 session=session,
             )
 
             try:
                 await client.login(register_event_listener=False)
-            except (BadCredentialsException, NotAuthenticatedException):
+            except (BadCredentialsError, NotAuthenticatedError):
                 errors["base"] = "invalid_auth"
             except (TimeoutError, ClientError):
                 errors["base"] = "cannot_connect"
-            except TooManyRequestsException:
+            except TooManyRequestsError:
                 errors["base"] = "too_many_requests"
             except Exception:  # noqa: BLE001
                 errors["base"] = "unknown"
