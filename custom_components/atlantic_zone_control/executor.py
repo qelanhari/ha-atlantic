@@ -42,7 +42,7 @@ class OverkizExecutor:
     def select_state(self, *states: str) -> OverkizStateType:
         """Select first existing active state in a list of states."""
         for state in states:
-            if current_state := self.device.states[state]:
+            if current_state := self.device.states.get(state):
                 return current_state.value
 
         return None
@@ -54,7 +54,7 @@ class OverkizExecutor:
     def select_attribute(self, *attributes: str) -> OverkizStateType:
         """Select first existing active state in a list of states."""
         for attribute in attributes:
-            if current_attribute := self.device.attributes[attribute]:
+            if current_attribute := self.device.attributes.get(attribute):
                 return current_attribute.value
 
         return None
