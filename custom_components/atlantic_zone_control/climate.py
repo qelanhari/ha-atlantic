@@ -153,14 +153,17 @@ class AtlanticPassAPCZoneControl(OverkizEntity, ClimateEntity):
                 else OverkizCommandParam.OFF
             )
             commands.append(
-                Command(OverkizCommand.SET_HEATING_COOLING_AUTO_SWITCH, [auto_switch])
+                Command(
+                    name=OverkizCommand.SET_HEATING_COOLING_AUTO_SWITCH,
+                    parameters=[auto_switch],
+                )
             )
 
         if hvac_mode != HVACMode.AUTO:
             commands.append(
                 Command(
-                    OverkizCommand.SET_PASS_APC_OPERATING_MODE,
-                    [HVAC_MODE_TO_OVERKIZ[hvac_mode]],
+                    name=OverkizCommand.SET_PASS_APC_OPERATING_MODE,
+                    parameters=[HVAC_MODE_TO_OVERKIZ[hvac_mode]],
                 )
             )
 
@@ -370,7 +373,10 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
             if self._is_heating_mode:
                 if not is_on:
                     commands.append(
-                        Command(OverkizCommand.SET_HEATING_ON_OFF, [OverkizCommandParam.ON])
+                        Command(
+                            name=OverkizCommand.SET_HEATING_ON_OFF,
+                            parameters=[OverkizCommandParam.ON],
+                        )
                     )
                 heating_mode = self.executor.select_state(
                     OverkizState.IO_PASS_APC_HEATING_MODE
@@ -378,14 +384,17 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
                 if heating_mode != OverkizCommandParam.MANU:
                     commands.append(
                         Command(
-                            OverkizCommand.SET_PASS_APC_HEATING_MODE,
-                            [OverkizCommandParam.MANU],
+                            name=OverkizCommand.SET_PASS_APC_HEATING_MODE,
+                            parameters=[OverkizCommandParam.MANU],
                         )
                     )
             elif self._is_cooling_mode:
                 if not is_on:
                     commands.append(
-                        Command(OverkizCommand.SET_COOLING_ON_OFF, [OverkizCommandParam.ON])
+                        Command(
+                            name=OverkizCommand.SET_COOLING_ON_OFF,
+                            parameters=[OverkizCommandParam.ON],
+                        )
                     )
                 cooling_mode = self.executor.select_state(
                     OverkizState.IO_PASS_APC_COOLING_MODE
@@ -393,18 +402,24 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
                 if cooling_mode != OverkizCommandParam.MANU:
                     commands.append(
                         Command(
-                            OverkizCommand.SET_PASS_APC_COOLING_MODE,
-                            [OverkizCommandParam.MANU],
+                            name=OverkizCommand.SET_PASS_APC_COOLING_MODE,
+                            parameters=[OverkizCommandParam.MANU],
                         )
                     )
         elif hvac_mode == HVACMode.OFF:
             if self._is_heating_mode and is_on:
                 commands.append(
-                    Command(OverkizCommand.SET_HEATING_ON_OFF, [OverkizCommandParam.OFF])
+                    Command(
+                        name=OverkizCommand.SET_HEATING_ON_OFF,
+                        parameters=[OverkizCommandParam.OFF],
+                    )
                 )
             elif self._is_cooling_mode and is_on:
                 commands.append(
-                    Command(OverkizCommand.SET_COOLING_ON_OFF, [OverkizCommandParam.OFF])
+                    Command(
+                        name=OverkizCommand.SET_COOLING_ON_OFF,
+                        parameters=[OverkizCommandParam.OFF],
+                    )
                 )
 
         if not commands:
@@ -436,13 +451,15 @@ class AtlanticPassAPCZoneControlZone(OverkizEntity, ClimateEntity):
         if self._is_heating_mode:
             commands.append(
                 Command(
-                    OverkizCommand.SET_HEATING_TARGET_TEMPERATURE, [temperature]
+                    name=OverkizCommand.SET_HEATING_TARGET_TEMPERATURE,
+                    parameters=[temperature],
                 )
             )
         elif self._is_cooling_mode:
             commands.append(
                 Command(
-                    OverkizCommand.SET_COOLING_TARGET_TEMPERATURE, [temperature]
+                    name=OverkizCommand.SET_COOLING_TARGET_TEMPERATURE,
+                    parameters=[temperature],
                 )
             )
 

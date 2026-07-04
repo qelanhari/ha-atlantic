@@ -318,15 +318,15 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
 
         if operating_mode == OverkizCommandParam.COOLING:
             refresh_commands = [
-                Command(OverkizCommand.REFRESH_PASS_APC_COOLING_MODE, []),
-                Command(OverkizCommand.REFRESH_PASS_APC_COOLING_PROFILE, []),
-                Command(OverkizCommand.REFRESH_TARGET_TEMPERATURE, []),
+                Command(name=OverkizCommand.REFRESH_PASS_APC_COOLING_MODE),
+                Command(name=OverkizCommand.REFRESH_PASS_APC_COOLING_PROFILE),
+                Command(name=OverkizCommand.REFRESH_TARGET_TEMPERATURE),
             ]
         else:
             refresh_commands = [
-                Command(OverkizCommand.REFRESH_PASS_APC_HEATING_MODE, []),
-                Command(OverkizCommand.REFRESH_PASS_APC_HEATING_PROFILE, []),
-                Command(OverkizCommand.REFRESH_TARGET_TEMPERATURE, []),
+                Command(name=OverkizCommand.REFRESH_PASS_APC_HEATING_MODE),
+                Command(name=OverkizCommand.REFRESH_PASS_APC_HEATING_PROFILE),
+                Command(name=OverkizCommand.REFRESH_TARGET_TEMPERATURE),
             ]
 
         LOGGER.debug("Operating mode: %s", operating_mode)
