@@ -287,25 +287,52 @@ class AtlanticPassAPCZoneControlZone(
         return self._real_target_temperature
 
     @property
-    def _real_hvac_mode(self) -> HVACMode:
-        """Return the actual hvac mode from device state."""
-        if self._is_heating_mode:
-            heating_state = cast(
-                str,
-                self.executor.select_state(OverkizState.CORE_HEATING_ON_OFF),
-            )
-            if heating_state == OverkizCommandParam.ON:
-                return HVACMode.AUTO
-            return HVACMode.OFF
+    def _profile_state(self) -> str | None:
+        """Return the active profile for the system's current mode.
 
-        if self._is_cooling_mode:
-            cooling_state = cast(
-                str,
-                self.executor.select_state(OverkizState.CORE_COOLING_ON_OFF),
-            )
-            if cooling_state == OverkizCommandParam.ON:
-                return HVACMode.AUTO
-            return HVACMode.OFF
+        The profile reports what the zone is actually doing right now:
+        `stop` means it is not conditioning, any other value names the
+        setpoint in use (`manu`, `comfort`, `eco`, ...).
+        """
+        if self._is_heating_mode:
+            state = OverkizState.IO_PASS_APC_HEATING_PROFILE
+        elif self._is_cooling_mode:
+            state = OverkizState.IO_PASS_APC_COOLING_PROFILE
+        else:
+            return None
+
+        return cast(str | None, self.executor.select_state(state))
+
+    @property
+    def _on_off_state(self) -> str | None:
+        """Return the zone's on/off state for the system's current mode."""
+        if self._is_heating_mode:
+            state = OverkizState.CORE_HEATING_ON_OFF
+        elif self._is_cooling_mode:
+            state = OverkizState.CORE_COOLING_ON_OFF
+        else:
+            return None
+
+        return cast(str | None, self.executor.select_state(state))
+
+    @property
+    def _real_hvac_mode(self) -> HVACMode:
+        """Return the actual hvac mode from device state.
+
+        Derived from the profile, not from core:*OnOffState. The API has no
+        refresh command for the OnOff states, so they are only ever updated by
+        an event -- miss one and the zone reads off forever with no way to
+        recover. The profile carries the same information, is refreshable via
+        refreshPassAPC*Profile, and is what the appliance actually acts on.
+        The OnOff state is only consulted when no profile is reported.
+        """
+        if (profile := self._profile_state) is not None:
+            if profile == OverkizCommandParam.STOP:
+                return HVACMode.OFF
+            return HVACMode.AUTO
+
+        if self._on_off_state == OverkizCommandParam.ON:
+            return HVACMode.AUTO
 
         return HVACMode.OFF
 
@@ -346,10 +373,10 @@ class AtlanticPassAPCZoneControlZone(
 
         action = OVERKIZ_TO_HVAC_ACTION.get(zone_mode, HVACAction.OFF)
 
-        # If the zone control is heating/cooling but this zone is off, it's idle
+        # The system is conditioning, but this zone's vent is closed.
         if (
             action in (HVACAction.HEATING, HVACAction.COOLING)
-            and self.hvac_mode == HVACMode.OFF
+            and self._profile_state == OverkizCommandParam.STOP
         ):
             return HVACAction.IDLE
 

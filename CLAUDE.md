@@ -67,5 +67,6 @@ Expiry is evaluated **on read** as well as on coordinator update, so a value can
 - Skip-if-unchanged compares against **real** state, never the optimistic value, and never skips while `has_pending_commands()` — comparing against our own assumption is what used to make a wrong assumption permanent
 - Commands impossible in the current system mode (`stop`/`drying`) raise `ServiceValidationError` rather than silently succeeding
 - `needs_mode_refresh=True` triggers a follow-up refresh of heating/cooling mode states 2s after flush
+- A zone's on/off comes from `io:PassAPC*ProfileState` (`stop` = not conditioning), **not** `core:*OnOffState`. The API has no `refreshCoolingOnOffState`, so the OnOff states are only ever updated by an event: miss one and the zone reads off forever with no way to recover. The profile carries the same information and is refreshable
 - `_real_*` properties read from device state; public properties check optimistic first
 - `time.monotonic` must be called, not bound as a `default_factory` — a bound reference escapes test clock patching
