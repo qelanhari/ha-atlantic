@@ -100,6 +100,15 @@ class CommandTracker:
             del self._pending[pending.exec_id]
         return stale
 
+    def has_own_commands(self) -> bool:
+        """Return True while a command this integration sent is in flight.
+
+        Refresh executions and executions started elsewhere carry no device
+        URLs, so they do not count: they change no state and must not block
+        reconciliation.
+        """
+        return any(p.device_urls for p in self._pending.values())
+
     def snapshot(self) -> list[dict[str, Any]]:
         """Return a JSON-serialisable view of everything in flight."""
         return [p.as_dict() for p in self._pending.values()]

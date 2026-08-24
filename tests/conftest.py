@@ -59,8 +59,25 @@ def _device(
     )
 
 
-def build_devices(operating_mode: str = "cooling") -> list[Device]:
-    """Build a zone control, one zone, and its temperature sensor."""
+def build_devices(
+    operating_mode: str = "cooling",
+    *,
+    cooling_profile: str | None = "manu",
+    cooling_on_off: str = "on",
+) -> list[Device]:
+    """Build a zone control, one zone, and its temperature sensor.
+
+    ``cooling_profile=None`` models a device that reports no profile state.
+    """
+    profile_states: dict[str, tuple[int, Any]] = (
+        {}
+        if cooling_profile is None
+        else {
+            "io:PassAPCCoolingProfileState": (3, cooling_profile),
+            "io:PassAPCHeatingProfileState": (3, "stop"),
+        }
+    )
+
     return [
         _device(
             ZONE_CONTROL_URL,
@@ -74,12 +91,13 @@ def build_devices(operating_mode: str = "cooling") -> list[Device]:
             "Salon",
             "AtlanticPassAPCHeatingAndCoolingZone",
             {
-                "core:CoolingOnOffState": (3, "on"),
+                "core:CoolingOnOffState": (3, cooling_on_off),
                 "core:HeatingOnOffState": (3, "off"),
                 "core:CoolingTargetTemperatureState": (2, 24.0),
                 "core:HeatingTargetTemperatureState": (2, 19.0),
                 "io:PassAPCCoolingModeState": (3, "manu"),
                 "io:PassAPCHeatingModeState": (3, "manu"),
+                **profile_states,
             },
             [
                 "setCoolingOnOffState",
