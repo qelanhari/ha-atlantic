@@ -320,11 +320,21 @@ class AtlanticPassAPCZoneControlZone(
         """Return the actual hvac mode from device state.
 
         Derived from the profile, not from core:*OnOffState. The API has no
-        refresh command for the OnOff states, so they are only ever updated by
-        an event -- miss one and the zone reads off forever with no way to
-        recover. The profile carries the same information, is refreshable via
-        refreshPassAPC*Profile, and is what the appliance actually acts on.
-        The OnOff state is only consulted when no profile is reported.
+        refreshCoolingOnOffState/refreshHeatingOnOffState command, so the OnOff
+        states are only ever updated by an event -- miss one and the zone reads
+        off indefinitely. (The widget does expose a generic `advancedRefresh`
+        which might reach them; untested.) The profile carries the same
+        information, is refreshable via refreshPassAPC*Profile, and is what the
+        appliance actually acts on. `stop` is the only non-conditioning value of
+        the eight it can report. The OnOff state is consulted only when no
+        profile is reported.
+
+        Residual limit: if the post-command profile refresh never lands, the
+        profile stays stale and this reports the old value until the hourly
+        zones refresh corrects it. Confirming from core:*OnOffState instead
+        would not help -- it clears the optimistic value sooner and then falls
+        through to the same stale profile, so it makes the display wrong
+        earlier rather than later.
         """
         if (profile := self._profile_state) is not None:
             if profile == OverkizCommandParam.STOP:
@@ -374,9 +384,12 @@ class AtlanticPassAPCZoneControlZone(
         action = OVERKIZ_TO_HVAC_ACTION.get(zone_mode, HVACAction.OFF)
 
         # The system is conditioning, but this zone's vent is closed.
+        # Deliberately keyed on hvac_mode, not the raw profile: hvac_mode is
+        # already profile-driven, and it also covers the optimistic window and
+        # devices that report no profile at all.
         if (
             action in (HVACAction.HEATING, HVACAction.COOLING)
-            and self._profile_state == OverkizCommandParam.STOP
+            and self.hvac_mode == HVACMode.OFF
         ):
             return HVACAction.IDLE
 

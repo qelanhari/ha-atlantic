@@ -69,8 +69,14 @@ async def test_stopped_zone_reported_off(
 async def test_non_stop_profiles_are_all_running(
     hass: HomeAssistant, config_entry, mock_client: MagicMock
 ) -> None:
-    """comfort/eco/derogation all mean the zone is conditioning."""
-    await setup_with(hass, config_entry, mock_client, cooling_profile="comfort")
+    """comfort/eco/derogation all mean the zone is conditioning.
+
+    `cooling_on_off="off"` matters: without it the OnOff fallback would also
+    return AUTO and this test would pass against the old code.
+    """
+    await setup_with(
+        hass, config_entry, mock_client, cooling_profile="comfort", cooling_on_off="off"
+    )
 
     assert hass.states.get(ZONE).state == HVACMode.AUTO
 
@@ -84,3 +90,37 @@ async def test_falls_back_to_on_off_without_a_profile(
     )
 
     assert hass.states.get(ZONE).state == HVACMode.AUTO
+
+
+async def test_fallback_device_off_is_idle_not_cooling(
+    hass: HomeAssistant, config_entry, mock_client: MagicMock
+) -> None:
+    """A zone with no profile reported must still report IDLE when off."""
+    await setup_with(
+        hass, config_entry, mock_client, cooling_profile=None, cooling_on_off="off"
+    )
+
+    state = hass.states.get(ZONE)
+    assert state.state == HVACMode.OFF
+    assert state.attributes["hvac_action"] == HVACAction.IDLE
+
+
+async def test_heating_mode_uses_the_heating_profile(
+    hass: HomeAssistant, config_entry, mock_client: MagicMock
+) -> None:
+    """The heating profile drives the zone when the system is heating.
+
+    The fixture's heating profile is `stop`, so a heating system must report
+    the zone off even though its cooling profile says `manu`.
+    """
+    await setup_with(
+        hass,
+        config_entry,
+        mock_client,
+        operating_mode="heating",
+        cooling_profile="manu",
+    )
+
+    state = hass.states.get(ZONE)
+    assert state.state == HVACMode.OFF
+    assert state.attributes["hvac_action"] == HVACAction.IDLE

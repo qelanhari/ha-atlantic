@@ -41,6 +41,12 @@ FRESHNESS_MAX_AGE: Final = 5.0
 # How often to reconcile entity-backing states against the cloud.
 RECONCILE_INTERVAL: Final = timedelta(minutes=15)
 
+# How often to ask the gateway to re-read the zone profiles. Reconciliation
+# only reads the server's cache; this is what refreshes the cache itself, and
+# the profile is now what determines whether a zone is on. One execution
+# covers every zone, so this is cheap against the exec rate limit.
+ZONES_REFRESH_INTERVAL: Final = timedelta(hours=1)
+
 EVENT_COMMAND_FAILED: Final = f"{DOMAIN}_command_failed"
 
 PLATFORMS: list[Platform] = [

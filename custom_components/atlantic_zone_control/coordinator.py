@@ -65,6 +65,7 @@ from .const import (
     IGNORED_OVERKIZ_DEVICES,
     LOGGER,
     UPDATE_INTERVAL,
+    ZONES_REFRESH_INTERVAL,
 )
 
 EVENT_HANDLERS: Registry[
@@ -178,6 +179,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self._flush_attempt = 0
         self._consecutive_failures = 0
         self._degraded = False
+        self._last_profile_refresh = 0.0
         self.reconcile_urls: frozenset[str] = frozenset()
 
     # ------------------------------------------------------------------
@@ -351,7 +353,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         that actually back entities. Must never raise: it runs from a timer and
         a failure here must not disturb the event stream.
         """
-        if self._command_queue or self.tracker:
+        if self._command_queue or self.tracker.has_own_commands():
             LOGGER.debug("Skipping reconcile: commands in flight")
             return
 
@@ -368,6 +370,11 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             LOGGER.debug(
                 "Reconcile clean: %d device(s) checked", len(self.reconcile_urls)
             )
+
+        # Warm the server's cache for the next cycle. Runs last and from this
+        # same coroutine, not a rival timer: the refresh registers an execution,
+        # and an execution in flight is exactly what makes reconcile skip.
+        await self._async_refresh_zone_profiles_if_due()
 
     async def _async_reconcile_states(self) -> int:
         """Merge fresh cloud states into the in-memory devices."""
@@ -513,21 +520,30 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
 
         return queue, refresh_urls
 
-    async def _send_queue(self, queue: dict[str, list[Command]]) -> None:
-        """Send a queue as one batch, falling back to per-device execution."""
+    async def _send_queue(
+        self, queue: dict[str, list[Command]], *, track: bool = True
+    ) -> None:
+        """Send a queue as one batch, falling back to per-device execution.
+
+        `track=False` is for refresh-only queues: they change no device state,
+        so tracking them would pin the fast poll and block reconciliation for
+        nothing, and a failure must not refute any optimistic value.
+        """
         try:
             if len(queue) > 1:
-                await self._send_batch(queue)
+                await self._send_batch(queue, track=track)
             else:
                 LOGGER.debug("Using per-device execution (single device)")
-                await self._execute_per_device(queue)
+                await self._execute_per_device(queue, track=track)
         except ExecutionQueueFullError as exception:
             self._requeue_after_queue_full(queue, exception)
             return
 
         self._flush_attempt = 0
 
-    async def _send_batch(self, queue: dict[str, list[Command]]) -> None:
+    async def _send_batch(
+        self, queue: dict[str, list[Command]], *, track: bool = True
+    ) -> None:
         """Send every device's commands in one action group."""
         try:
             exec_id = await self._batch_executor.execute_multi(queue)
@@ -535,17 +551,18 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             raise
         except SEND_ERRORS as exception:
             LOGGER.error("Multi-device batch failed, falling back: %s", exception)
-            await self._execute_per_device(queue)
+            await self._execute_per_device(queue, track=track)
             return
 
         LOGGER.debug(
             "Multi-device batch sent: exec_id=%s, %d device(s)", exec_id, len(queue)
         )
-        self.tracker.register(
-            exec_id,
-            queue.keys(),
-            [str(c.name) for commands in queue.values() for c in commands],
-        )
+        if track:
+            self.tracker.register(
+                exec_id,
+                queue.keys(),
+                [str(c.name) for commands in queue.values() for c in commands],
+            )
 
     def _requeue_after_queue_full(
         self, queue: dict[str, list[Command]], exception: Exception
@@ -588,7 +605,9 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             self.hass, delay, self._async_flush_commands_callback
         )
 
-    async def _execute_per_device(self, queue: dict[str, list[Command]]) -> None:
+    async def _execute_per_device(
+        self, queue: dict[str, list[Command]], *, track: bool = True
+    ) -> None:
         """Execute queued commands one device at a time (fallback)."""
         for device_url, commands in queue.items():
             LOGGER.debug(
@@ -610,12 +629,14 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
                     device_url,
                     exception,
                 )
-                self.invalidate_optimistic([device_url])
+                if track:
+                    self.invalidate_optimistic([device_url])
                 continue
 
-            self.tracker.register(
-                exec_id, [device_url], [str(c.name) for c in commands]
-            )
+            if track:
+                self.tracker.register(
+                    exec_id, [device_url], [str(c.name) for c in commands]
+                )
 
     async def _safe_refresh(self) -> None:
         """Refresh without letting a failure break the rest of the flush."""
@@ -681,6 +702,44 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             Command(name=OverkizCommand.REFRESH_TARGET_TEMPERATURE),
         ]
 
+    async def _async_refresh_zone_profiles_if_due(self) -> None:
+        """Ask the gateway to re-read every zone's profile, at most hourly.
+
+        A zone's on/off now comes from its profile, so the profile must not be
+        allowed to go as stale as the on/off state it replaced. Reconciliation
+        only reads the server's cache; only a refresh execution updates that
+        cache from the appliance. The zone control device exposes `refreshZones*`
+        commands covering every zone in a single execution, which is far cheaper
+        against the exec rate limit than three commands per zone.
+        """
+        now = time.monotonic()
+        if now - self._last_profile_refresh < ZONES_REFRESH_INTERVAL.total_seconds():
+            return
+
+        zone_control_url = self._zone_control_url()
+        if zone_control_url is None:
+            return
+
+        commands = [
+            Command(name=OverkizCommand.REFRESH_ZONES_PASS_APC_COOLING_PROFILE),
+            Command(name=OverkizCommand.REFRESH_ZONES_PASS_APC_HEATING_PROFILE),
+            Command(name=OverkizCommand.REFRESH_ZONES_TARGET_TEMPERATURE),
+        ]
+
+        LOGGER.debug("Refreshing zone profiles via %s", zone_control_url)
+        self._last_profile_refresh = now
+
+        try:
+            await self._send_queue({zone_control_url: commands}, track=False)
+        except Exception:  # noqa: BLE001 - timer-driven; must not propagate
+            LOGGER.exception("Unexpected error refreshing zone profiles")
+
+    def _zone_control_url(self) -> str | None:
+        """Return the zone control device URL, if the setup has one."""
+        return next(
+            (url for url in sorted(self.reconcile_urls) if url.endswith("#1")), None
+        )
+
     async def _async_refresh_modes(self, device_urls: set[str]) -> None:
         """Refresh mode states for devices, batched into a single API call."""
         # Resolved per device: the operating mode is a property of each
@@ -697,7 +756,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         )
 
         try:
-            await self._send_queue(refresh_queue)
+            await self._send_queue(refresh_queue, track=False)
         except Exception:  # noqa: BLE001 - detached task
             LOGGER.exception("Unexpected error refreshing modes for %s", device_urls)
 

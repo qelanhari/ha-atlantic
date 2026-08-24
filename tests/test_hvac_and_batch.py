@@ -53,6 +53,21 @@ def sent_commands(mock_client: MagicMock) -> list[str]:
     return [str(c.name) for action in actions for c in action.commands]
 
 
+def sent_state_changing_commands(mock_client: MagicMock) -> list[str]:
+    """Return every non-refresh command sent so far.
+
+    Refresh executions are expected background traffic; only state-changing
+    commands matter when asserting that a request was skipped.
+    """
+    return [
+        str(command.name)
+        for call in mock_client.execute_action_group.await_args_list
+        for action in call.kwargs["actions"]
+        for command in action.commands
+        if not str(command.name).startswith("refresh")
+    ]
+
+
 async def test_zone_off_sends_cooling_off(
     hass: HomeAssistant,
     setup_integration,
@@ -77,7 +92,7 @@ async def test_zone_already_in_mode_is_skipped(
     await set_mode(hass, ZONE, HVACMode.AUTO)
     await flush(hass, freezer)
 
-    mock_client.execute_action_group.assert_not_awaited()
+    assert sent_state_changing_commands(mock_client) == []
 
 
 async def test_system_mode_change_sends_operating_mode(
@@ -132,7 +147,7 @@ async def test_system_mode_already_set_is_skipped(
     await set_mode(hass, SYSTEM, HVACMode.COOL)
     await flush(hass, freezer)
 
-    mock_client.execute_action_group.assert_not_awaited()
+    assert sent_state_changing_commands(mock_client) == []
 
 
 async def test_multi_device_queue_uses_one_action_group(
