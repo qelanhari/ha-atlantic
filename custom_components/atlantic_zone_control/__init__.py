@@ -11,6 +11,7 @@ from pyoverkiz.client import OverkizClient
 from pyoverkiz.enums import Server, UIWidget
 from pyoverkiz.exceptions import (
     BadCredentialsError,
+    BaseOverkizError,
     MaintenanceError,
     NotAuthenticatedError,
     TooManyRequestsError,
@@ -23,8 +24,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from homeassistant.helpers.event import async_track_time_interval
 
-from .const import ATLANTIC_WIDGET_TO_PLATFORM, DOMAIN, LOGGER, PLATFORMS
+from .const import (
+    ATLANTIC_WIDGET_TO_PLATFORM,
+    DOMAIN,
+    LOGGER,
+    PLATFORMS,
+    RECONCILE_INTERVAL,
+)
 from .coordinator import OverkizDataUpdateCoordinator
 
 
@@ -90,8 +98,16 @@ async def async_setup_entry(
         if platform := ATLANTIC_WIDGET_TO_PLATFORM.get(UIWidget(device.widget)):
             platforms[platform].append(device)
 
+    coordinator.reconcile_urls = _reconcile_urls(platforms, coordinator)
+
     entry.runtime_data = AtlanticZoneControlData(
         coordinator=coordinator, platforms=platforms
+    )
+
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass, coordinator.async_reconcile, RECONCILE_INTERVAL
+        )
     )
 
     # Register gateway in device registry
@@ -117,9 +133,47 @@ async def async_setup_entry(
     return True
 
 
+def _reconcile_urls(
+    platforms: defaultdict[Platform, list[Device]],
+    coordinator: OverkizDataUpdateCoordinator,
+) -> frozenset[str]:
+    """Return the device URLs whose states actually back an entity.
+
+    Reconciliation reads these one by one, so the set is deliberately narrow:
+    the zone control, each zone, and each zone's temperature sensor.
+    """
+    urls: set[str] = set()
+
+    for devices in platforms.values():
+        for device in devices:
+            urls.add(device.device_url)
+
+            base, _, index = device.device_url.partition("#")
+            if index.isdigit():
+                sensor_url = f"{base}#{int(index) + 1}"
+                if sensor_url in coordinator.devices:
+                    urls.add(sensor_url)
+
+    LOGGER.debug("Reconciling %d device URL(s): %s", len(urls), sorted(urls))
+
+    return frozenset(urls)
+
+
 async def async_unload_entry(
     hass: HomeAssistant, entry: AtlanticZoneControlConfigEntry
 ) -> bool:
     """Unload a config entry."""
-    entry.runtime_data.coordinator.cancel_pending_flush()
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    coordinator = entry.runtime_data.coordinator
+    coordinator.cancel_pending_flush()
+
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+    if unloaded:
+        # DEVICE_UPDATED reloads the entry, so without this every reload would
+        # leak a server-side event listener.
+        try:
+            await coordinator.client.unregister_event_listener()
+        except (BaseOverkizError, ClientError, TimeoutError) as exception:
+            LOGGER.debug("Could not unregister event listener: %s", exception)
+
+    return unloaded

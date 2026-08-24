@@ -25,6 +25,7 @@ Provides simplified climate control with per-zone temperature management and sys
 
 ## Requirements
 
+- Home Assistant **2026.8.0** or newer
 - Atlantic Zone Control 2.0 (Pass APC) heat pump
 - Somfy TaHoma Switch (or compatible Overkiz gateway)
 - Somfy account with cloud API access
@@ -43,6 +44,24 @@ Provides simplified climate control with per-zone temperature management and sys
 
 1. Copy `custom_components/atlantic_zone_control/` to your Home Assistant `config/custom_components/` directory
 2. Restart Home Assistant
+
+## Troubleshooting
+
+If Home Assistant and the house disagree, enable debug logging and download
+diagnostics from the integration card. The log records why each command
+failed (`failure_type`), and `Reconcile corrected …` lines name any state
+that had drifted from the cloud.
+
+```yaml
+logger:
+  logs:
+    custom_components.atlantic_zone_control: debug
+    pyoverkiz: debug
+```
+
+The integration also fires an `atlantic_zone_control_command_failed` event
+carrying the affected devices and the failure reason, which you can use in an
+automation to get notified.
 
 ## Configuration
 

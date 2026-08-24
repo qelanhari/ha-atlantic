@@ -29,5 +29,10 @@
     "abort": {
       "already_configured": "This gateway is already configured."
     }
+  },
+  "exceptions": {
+    "zone_control_inactive": {
+      "message": "Cannot control {name}: the zone control is currently '{mode}', so there is no heating or cooling setpoint to change."
+    }
   }
 }
