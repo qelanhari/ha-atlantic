@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from freezegun.api import FrozenDateTimeFactory
-from pyoverkiz.enums import EventName, ExecutionState, OverkizCommand
+from pyoverkiz.enums import EventName, ExecutionState, FailureType, OverkizCommand
 from pyoverkiz.models import Command, ExecutionStateChangedEvent
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
@@ -85,13 +85,19 @@ async def test_stale_execution_unpins_the_fast_poll(
     assert coordinator.update_interval == UPDATE_INTERVAL
 
 
-async def test_not_transmitted_is_treated_as_a_failure(
+async def test_not_transmitted_does_not_roll_back(
     hass: HomeAssistant,
     setup_integration,
     mock_client: MagicMock,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """NOT_TRANSMITTED means the commands never reached the appliance."""
+    """NOT_TRANSMITTED is an intermediate state, not a failure.
+
+    The live gateway reports it with failure_type=NO_FAILURE and executions
+    continue past it. Treating it as terminal rolled back commands that had
+    actually succeeded, which is what made the UI snap back to off two seconds
+    after every turn-on.
+    """
     coordinator = setup_integration.runtime_data.coordinator
 
     await hass.services.async_call(
@@ -110,15 +116,81 @@ async def test_not_transmitted_is_treated_as_a_failure(
             exec_id="exec-1",
             old_state=ExecutionState.INITIALIZED,
             new_state=ExecutionState.NOT_TRANSMITTED,
+            failure_type="NO_FAILURE",
+            failure_type_code=FailureType.NO_FAILURE,
         )
     ]
     freezer.tick(5)
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
 
+    assert hass.states.get(ZONE).attributes[ATTR_TEMPERATURE] == 22.0
+    assert len(coordinator.tracker) == 1
+
+
+async def test_no_failure_code_never_rolls_back(
+    hass: HomeAssistant, setup_integration
+) -> None:
+    """A failure payload saying NO_FAILURE must not refute anything."""
+    coordinator = setup_integration.runtime_data.coordinator
+    coordinator.tracker.register("exec-1", [ZONE_URL], ["setCoolingOnOffState"])
+    before = coordinator.optimistic_generation(ZONE_URL)
+
+    coordinator.handle_execution_failure(
+        ExecutionStateChangedEvent(
+            name=EventName.EXECUTION_STATE_CHANGED,
+            exec_id="exec-1",
+            old_state=ExecutionState.INITIALIZED,
+            new_state=ExecutionState.NOT_TRANSMITTED,
+            failure_type="NO_FAILURE",
+            failure_type_code=FailureType.NO_FAILURE,
+        )
+    )
+
+    assert coordinator.optimistic_generation(ZONE_URL) == before
+    assert len(coordinator.tracker) == 1
+
+
+async def test_real_failure_still_rolls_back(
+    hass: HomeAssistant, setup_integration
+) -> None:
+    """A genuine transport failure must still refute optimistic state."""
+    coordinator = setup_integration.runtime_data.coordinator
+    coordinator.tracker.register("exec-1", [ZONE_URL], ["setCoolingOnOffState"])
+    before = coordinator.optimistic_generation(ZONE_URL)
+
+    coordinator.handle_execution_failure(
+        ExecutionStateChangedEvent(
+            name=EventName.EXECUTION_STATE_CHANGED,
+            exec_id="exec-1",
+            old_state=ExecutionState.QUEUED_GATEWAY_SIDE,
+            new_state=ExecutionState.FAILED,
+            failure_type="DATA_TRANSPORT_SERVICE_ERROR",
+            failure_type_code=FailureType.DATA_TRANSPORT_SERVICE_ERROR,
+            failed_commands=[{"deviceURL": ZONE_URL, "rank": 1}],
+        )
+    )
+
+    assert coordinator.optimistic_generation(ZONE_URL) > before
+    assert len(coordinator.tracker) == 0
+
+
+async def test_stuck_not_transmitted_is_still_swept(
+    hass: HomeAssistant,
+    setup_integration,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """An execution parked at NOT_TRANSMITTED must not pin the fast poll."""
+    coordinator = setup_integration.runtime_data.coordinator
+    coordinator.tracker.register("exec-1", [ZONE_URL], ["setCoolingOnOffState"])
+
+    freezer.tick(EXECUTION_MAX_AGE + 10)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
     assert len(coordinator.tracker) == 0
     assert coordinator.update_interval == UPDATE_INTERVAL
-    assert hass.states.get(ZONE).attributes[ATTR_TEMPERATURE] == 24.0
 
 
 async def test_foreign_execution_does_not_roll_back_our_state(

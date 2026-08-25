@@ -14,6 +14,7 @@ from pyoverkiz.client import OverkizClient
 from pyoverkiz.enums import (
     EventName,
     ExecutionState,
+    FailureType,
     OverkizCommand,
     OverkizCommandParam,
     OverkizState,
@@ -77,11 +78,11 @@ EVENT_HANDLERS: Registry[
 # detached flush task and strand optimistic state.
 SEND_ERRORS: tuple[type[Exception], ...] = (BaseOverkizError, ClientError, TimeoutError)
 
-# Executions that ended without the commands being applied.
-TERMINAL_FAILURE_STATES: tuple[ExecutionState, ...] = (
-    ExecutionState.FAILED,
-    ExecutionState.NOT_TRANSMITTED,
-)
+# The only state that means the commands were not applied. NOT_TRANSMITTED is
+# deliberately absent: the server reports it with failure_type=NO_FAILURE, and
+# executions continue past it (INITIALIZED -> NOT_TRANSMITTED -> ... -> FAILED
+# has been observed on a live gateway). HA core treats only these as terminal.
+TERMINAL_FAILURE_STATES: tuple[ExecutionState, ...] = (ExecutionState.FAILED,)
 
 # The exec category is rate-limited to roughly one call per 29 minutes, so
 # retrying a full queue is mostly futile. Try twice, then surface the failure.
@@ -180,6 +181,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self._consecutive_failures = 0
         self._degraded = False
         self._last_profile_refresh = 0.0
+        self._state_updated_at: dict[tuple[str, str], float] = {}
         self.reconcile_urls: frozenset[str] = frozenset()
 
     # ------------------------------------------------------------------
@@ -201,6 +203,28 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
     def optimistic_generation(self, device_url: str) -> int:
         """Return the current invalidation generation for a device."""
         return self._optimistic_generation.get(device_url, 0)
+
+    # ------------------------------------------------------------------
+    # State freshness
+    # ------------------------------------------------------------------
+
+    @callback
+    def note_state_update(self, device_url: str, state_name: str) -> None:
+        """Record that the gateway just told us about this state."""
+        self._state_updated_at[(device_url, state_name)] = time.monotonic()
+
+    def state_age(self, device_url: str, state_name: str) -> float | None:
+        """Return seconds since this state was last reported, if ever.
+
+        None means the state has not been seen changing -- true for everything
+        loaded from get_setup() at startup. Callers comparing two states use
+        this to believe whichever the gateway reported most recently, because
+        no single Overkiz state is reliably fresh: the on/off states cannot be
+        refreshed at all, and profile refreshes do not always reach the
+        appliance.
+        """
+        updated_at = self._state_updated_at.get((device_url, state_name))
+        return None if updated_at is None else time.monotonic() - updated_at
 
     # ------------------------------------------------------------------
     # Polling
@@ -408,6 +432,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             normalized.value,
         )
         device.states[normalized.name] = normalized
+        self.note_state_update(device.device_url, normalized.name)
         return 1
 
     @staticmethod
@@ -767,8 +792,30 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
     @callback
     def handle_execution_failure(self, event: ExecutionStateChangedEvent) -> None:
         """Refute optimistic state and report why an execution failed."""
-        pending = self.tracker.pop(event.exec_id)
         failure_code = event.failure_type_code
+
+        if failure_code is FailureType.NO_FAILURE:
+            # The server reports some transitions as failures while explicitly
+            # saying nothing went wrong. Rolling back here would revert a
+            # command that actually succeeded.
+            LOGGER.debug(
+                "Execution %s reported %s with no failure; leaving state alone",
+                event.exec_id,
+                event.new_state,
+            )
+            self.tracker.touch(event.exec_id)
+            return
+
+        pending = self.tracker.pop(event.exec_id)
+
+        if failure_code is FailureType.DATA_TRANSPORT_SERVICE_ERROR:
+            LOGGER.warning(
+                "Gateway could not reach the appliance for execution %s: %s. "
+                "This is a gateway/appliance link problem, not a command error",
+                event.exec_id,
+                event.failed_commands,
+            )
+
         LOGGER.error(
             "Execution %s %s -> %s failed for %s (commands: %s): "
             "failure_type=%s code=%s(%s) failed_commands=%s",
@@ -888,6 +935,7 @@ async def on_device_state_changed(
 
     for state in event.device_states:
         device.states[state.name] = state
+        coordinator.note_state_update(event.device_url, state.name)
 
 
 @EVENT_HANDLERS.register(EventName.DEVICE_REMOVED)

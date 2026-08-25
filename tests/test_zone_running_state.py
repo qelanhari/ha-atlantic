@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from pyoverkiz.enums import DataType
+from pyoverkiz.models import EventState
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.core import HomeAssistant
 
-from .conftest import build_devices
+from .conftest import ZONE_URL, build_devices
 
 ZONE = "climate.zone_control_salon"
 
@@ -124,3 +126,82 @@ async def test_heating_mode_uses_the_heating_profile(
     state = hass.states.get(ZONE)
     assert state.state == HVACMode.OFF
     assert state.attributes["hvac_action"] == HVACAction.IDLE
+
+
+async def test_fresh_on_off_beats_stale_profile(
+    hass: HomeAssistant, setup_integration, mock_client: MagicMock
+) -> None:
+    """2026-08-25: zone commanded on, profile refresh never landed.
+
+    core:CoolingOnOffState arrived by event and says on; the profile is still
+    the `stop` loaded at startup. The zone is genuinely running, so the fresher
+    signal must win.
+    """
+    coordinator = setup_integration.runtime_data.coordinator
+    device = coordinator.devices[ZONE_URL]
+
+    device.states["io:PassAPCCoolingProfileState"] = EventState(
+        name="io:PassAPCCoolingProfileState", type=DataType.STRING, value="stop"
+    )
+    device.states["core:CoolingOnOffState"] = EventState(
+        name="core:CoolingOnOffState", type=DataType.STRING, value="on"
+    )
+    coordinator.note_state_update(ZONE_URL, "core:CoolingOnOffState")
+    coordinator.async_update_listeners()
+    await hass.async_block_till_done()
+
+    assert hass.states.get(ZONE).state == HVACMode.AUTO
+
+
+async def test_fresh_profile_beats_stale_on_off(
+    hass: HomeAssistant, setup_integration, mock_client: MagicMock
+) -> None:
+    """2026-08-24: zone running, core:CoolingOnOffState stale at off.
+
+    The mirror image of the case above; the profile is the fresher signal here.
+    """
+    coordinator = setup_integration.runtime_data.coordinator
+    device = coordinator.devices[ZONE_URL]
+
+    device.states["core:CoolingOnOffState"] = EventState(
+        name="core:CoolingOnOffState", type=DataType.STRING, value="off"
+    )
+    device.states["io:PassAPCCoolingProfileState"] = EventState(
+        name="io:PassAPCCoolingProfileState", type=DataType.STRING, value="manu"
+    )
+    coordinator.note_state_update(ZONE_URL, "io:PassAPCCoolingProfileState")
+    coordinator.async_update_listeners()
+    await hass.async_block_till_done()
+
+    assert hass.states.get(ZONE).state == HVACMode.AUTO
+
+
+async def test_profile_wins_without_recency_information(
+    hass: HomeAssistant, config_entry, mock_client: MagicMock
+) -> None:
+    """At startup nothing has a timestamp, so the profile decides."""
+    await setup_with(
+        hass, config_entry, mock_client, cooling_profile="manu", cooling_on_off="off"
+    )
+
+    assert hass.states.get(ZONE).state == HVACMode.AUTO
+
+
+async def test_both_off_stays_off_regardless_of_recency(
+    hass: HomeAssistant, setup_integration, mock_client: MagicMock
+) -> None:
+    """When the two signals agree, recency cannot flip the answer."""
+    coordinator = setup_integration.runtime_data.coordinator
+    device = coordinator.devices[ZONE_URL]
+
+    device.states["core:CoolingOnOffState"] = EventState(
+        name="core:CoolingOnOffState", type=DataType.STRING, value="off"
+    )
+    device.states["io:PassAPCCoolingProfileState"] = EventState(
+        name="io:PassAPCCoolingProfileState", type=DataType.STRING, value="stop"
+    )
+    coordinator.note_state_update(ZONE_URL, "core:CoolingOnOffState")
+    coordinator.async_update_listeners()
+    await hass.async_block_till_done()
+
+    assert hass.states.get(ZONE).state == HVACMode.OFF
