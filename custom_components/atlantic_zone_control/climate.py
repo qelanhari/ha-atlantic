@@ -287,64 +287,82 @@ class AtlanticPassAPCZoneControlZone(
         return self._real_target_temperature
 
     @property
+    def _mode_states(self) -> tuple[str, str] | None:
+        """Return the (profile, on/off) state names for the system's mode."""
+        if self._is_heating_mode:
+            return (
+                OverkizState.IO_PASS_APC_HEATING_PROFILE,
+                OverkizState.CORE_HEATING_ON_OFF,
+            )
+        if self._is_cooling_mode:
+            return (
+                OverkizState.IO_PASS_APC_COOLING_PROFILE,
+                OverkizState.CORE_COOLING_ON_OFF,
+            )
+        return None
+
+    @property
     def _profile_state(self) -> str | None:
         """Return the active profile for the system's current mode.
 
-        The profile reports what the zone is actually doing right now:
-        `stop` means it is not conditioning, any other value names the
-        setpoint in use (`manu`, `comfort`, `eco`, ...).
+        The profile reports what the zone is doing: `stop` means it is not
+        conditioning, any other value names the setpoint in use (`manu`,
+        `comfort`, `eco`, ...).
         """
-        if self._is_heating_mode:
-            state = OverkizState.IO_PASS_APC_HEATING_PROFILE
-        elif self._is_cooling_mode:
-            state = OverkizState.IO_PASS_APC_COOLING_PROFILE
-        else:
+        if (names := self._mode_states) is None:
             return None
-
-        return cast(str | None, self.executor.select_state(state))
+        return cast(str | None, self.executor.select_state(names[0]))
 
     @property
     def _on_off_state(self) -> str | None:
         """Return the zone's on/off state for the system's current mode."""
-        if self._is_heating_mode:
-            state = OverkizState.CORE_HEATING_ON_OFF
-        elif self._is_cooling_mode:
-            state = OverkizState.CORE_COOLING_ON_OFF
-        else:
+        if (names := self._mode_states) is None:
             return None
+        return cast(str | None, self.executor.select_state(names[1]))
 
-        return cast(str | None, self.executor.select_state(state))
+    def _mode_from_profile(self, profile: str) -> HVACMode:
+        """Map a profile value to on/off."""
+        return HVACMode.OFF if profile == OverkizCommandParam.STOP else HVACMode.AUTO
+
+    def _mode_from_on_off(self, on_off: str) -> HVACMode:
+        """Map an on/off value to on/off."""
+        return HVACMode.AUTO if on_off == OverkizCommandParam.ON else HVACMode.OFF
 
     @property
     def _real_hvac_mode(self) -> HVACMode:
-        """Return the actual hvac mode from device state.
+        """Return the actual hvac mode, trusting the fresher of two signals.
 
-        Derived from the profile, not from core:*OnOffState. The API has no
-        refreshCoolingOnOffState/refreshHeatingOnOffState command, so the OnOff
-        states are only ever updated by an event -- miss one and the zone reads
-        off indefinitely. (The widget does expose a generic `advancedRefresh`
-        which might reach them; untested.) The profile carries the same
-        information, is refreshable via refreshPassAPC*Profile, and is what the
-        appliance actually acts on. `stop` is the only non-conditioning value of
-        the eight it can report. The OnOff state is consulted only when no
-        profile is reported.
+        Neither Overkiz state is reliably current, and which one is stale
+        varies. `core:*OnOffState` has no refresh command at all, so a missed
+        event leaves it wrong indefinitely. `io:PassAPC*ProfileState` is
+        refreshable, but the refresh does not always reach the appliance.
+        Both have been observed stale on the same installation, in opposite
+        directions, days apart.
 
-        Residual limit: if the post-command profile refresh never lands, the
-        profile stays stale and this reports the old value until the hourly
-        zones refresh corrects it. Confirming from core:*OnOffState instead
-        would not help -- it clears the optimistic value sooner and then falls
-        through to the same stale profile, so it makes the display wrong
-        earlier rather than later.
+        So believe whichever the gateway reported most recently. With no
+        recency information for either -- everything loaded from get_setup() at
+        startup -- prefer the profile, which is what the appliance acts on.
         """
-        if (profile := self._profile_state) is not None:
-            if profile == OverkizCommandParam.STOP:
-                return HVACMode.OFF
-            return HVACMode.AUTO
+        names = self._mode_states
+        if names is None:
+            return HVACMode.OFF
 
-        if self._on_off_state == OverkizCommandParam.ON:
-            return HVACMode.AUTO
+        profile_name, on_off_name = names
+        profile = cast(str | None, self.executor.select_state(profile_name))
+        on_off = cast(str | None, self.executor.select_state(on_off_name))
 
-        return HVACMode.OFF
+        if profile is None:
+            return HVACMode.OFF if on_off is None else self._mode_from_on_off(on_off)
+        if on_off is None:
+            return self._mode_from_profile(profile)
+
+        profile_age = self.coordinator.state_age(self.device_url, profile_name)
+        on_off_age = self.coordinator.state_age(self.device_url, on_off_name)
+
+        if on_off_age is not None and (profile_age is None or on_off_age < profile_age):
+            return self._mode_from_on_off(on_off)
+
+        return self._mode_from_profile(profile)
 
     @property
     def hvac_mode(self) -> HVACMode:
@@ -353,6 +371,23 @@ class AtlanticPassAPCZoneControlZone(
         if optimistic is not None:
             return cast(HVACMode, optimistic)
         return self._real_hvac_mode
+
+    def _hvac_mode_confirmed(self, wanted: HVACMode) -> bool:
+        """Return True once either state agrees the zone is on or off.
+
+        Both are accepted because `_real_hvac_mode` now follows whichever is
+        fresher: waiting for one specific state would hold the assumption open
+        while the other has already confirmed it.
+        """
+        if self._real_hvac_mode == wanted:
+            return True
+
+        profile = self._profile_state
+        if profile is not None and self._mode_from_profile(profile) == wanted:
+            return True
+
+        on_off = self._on_off_state
+        return on_off is not None and self._mode_from_on_off(on_off) == wanted
 
     def _temperature_confirmed(self, wanted: float) -> bool:
         """Return True once the device reports the temperature we asked for.
@@ -368,7 +403,7 @@ class AtlanticPassAPCZoneControlZone(
         """Drop optimistic state the device has confirmed or refuted."""
         self._reconcile_optimistic(
             {
-                "hvac_mode": lambda wanted: self._real_hvac_mode == wanted,
+                "hvac_mode": self._hvac_mode_confirmed,
                 "temperature": self._temperature_confirmed,
             }
         )
