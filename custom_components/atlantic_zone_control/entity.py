@@ -7,6 +7,7 @@ from typing import cast
 from pyoverkiz.enums import OverkizAttribute, OverkizState
 from pyoverkiz.models import Device
 
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -91,7 +92,7 @@ class OverkizEntity(CoordinatorEntity[OverkizDataUpdateCoordinator]):
             else None
         )
 
-        return DeviceInfo(
+        device_info = DeviceInfo(
             identifiers={(DOMAIN, self.executor.base_device_url)},
             name=self.device.label,
             manufacturer=str(manufacturer),
@@ -103,6 +104,25 @@ class OverkizEntity(CoordinatorEntity[OverkizDataUpdateCoordinator]):
             model_id=self.device.widget,
             hw_version=self.device.controllable_name,
             suggested_area=suggested_area,
-            via_device=(DOMAIN, self.executor.get_gateway_id()),
             configuration_url=self.coordinator.client.server_config.configuration_url,
         )
+        if (gateway_device_id := self._gateway_device_id()) is not None:
+            device_info["via_device_id"] = gateway_device_id
+        return device_info
+
+    def _gateway_device_id(self) -> str | None:
+        """Registry id of the gateway this device hangs off, if registered.
+
+        Gateways are registered in `async_setup_entry` before the platforms
+        load, so the lookup normally succeeds. A device whose gateway is not
+        known (e.g. not returned by `setup.gateways`) is still created, just
+        without the via-device link, instead of failing the whole platform.
+        """
+        try:
+            return dr.async_get_device_id_by_identifier(
+                self.coordinator.hass,
+                (DOMAIN, self.executor.get_gateway_id()),
+                config_entry_id=self.coordinator.config_entry.entry_id,
+            )
+        except ValueError:
+            return None
