@@ -11,14 +11,15 @@ Distributed via HACS. Source lives entirely in `custom_components/atlantic_zone_
 ## Development
 
 ```bash
-uv venv --python 3.13 .venv
+uv venv --python 3.14 .venv
 uv pip install --python .venv -r requirements_test.txt "pyoverkiz>=2.1.0,<3.0.0" ruff
 .venv/bin/python -m pytest tests/ -q
 .venv/bin/ruff check custom_components/ tests/
 ```
 
-Note the test harness (`pytest-homeassistant-custom-component`) pins an older HA than the
-integration's declared minimum; the code under test is version-agnostic, but be aware of the gap.
+The test harness (`pytest-homeassistant-custom-component`) pins its own HA version; keep it at
+or above the integration's declared minimum, or APIs the integration relies on (e.g.
+`dr.async_get_device_id_by_identifier`) are missing and every entity test fails at setup.
 
 To verify against real hardware:
 1. Copy `custom_components/atlantic_zone_control/` into a Home Assistant instance's `config/custom_components/`
