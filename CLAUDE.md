@@ -11,14 +11,15 @@ Distributed via HACS. Source lives entirely in `custom_components/atlantic_zone_
 ## Development
 
 ```bash
-uv venv --python 3.13 .venv
+uv venv --python 3.14 .venv
 uv pip install --python .venv -r requirements_test.txt "pyoverkiz>=2.1.0,<3.0.0" ruff
 .venv/bin/python -m pytest tests/ -q
 .venv/bin/ruff check custom_components/ tests/
 ```
 
-Note the test harness (`pytest-homeassistant-custom-component`) pins an older HA than the
-integration's declared minimum; the code under test is version-agnostic, but be aware of the gap.
+The test harness (`pytest-homeassistant-custom-component`) pins its own HA version; keep it at
+or above the integration's declared minimum, or APIs the integration relies on (e.g.
+`dr.async_get_device_id_by_identifier`) are missing and every entity test fails at setup.
 
 To verify against real hardware:
 1. Copy `custom_components/atlantic_zone_control/` into a Home Assistant instance's `config/custom_components/`
@@ -67,11 +68,8 @@ Expiry is evaluated **on read** as well as on coordinator update, so a value can
 - Skip-if-unchanged compares against **real** state, never the optimistic value, and never skips while `has_pending_commands()` — comparing against our own assumption is what used to make a wrong assumption permanent
 - Commands impossible in the current system mode (`stop`/`drying`) raise `ServiceValidationError` rather than silently succeeding
 - `needs_mode_refresh=True` triggers a follow-up refresh of heating/cooling mode states 2s after flush
-- **No single Overkiz state is reliably fresh**, so a zone's on/off is decided by whichever of `io:PassAPC*ProfileState` and `core:*OnOffState` the gateway reported most recently (`coordinator.state_age()`). Both have been observed stale on the same installation days apart, in opposite directions. `core:*OnOffState` has no refresh command at all; the profile is refreshable but the refresh does not always reach the appliance. With no recency data (everything from `get_setup()` at startup) the profile wins
-- `stop` is the only non-conditioning value of the eight the profile can report (`absence`, `comfort`, `derogation`, `eco`, `externalSetpoint`, `frostprotection`, `manu`, `stop`)
+- A zone's on/off comes from `core:*OnOffState` **alone**. `io:PassAPC*ProfileState` names where the setpoint comes from (`manu`, `comfort`, `externalSetpoint` = remote/room thermostat, ...), not whether the zone runs: on 2026-10-04 an off zone reported `comfort`, then `externalSetpoint`, then no profile at all. Known limit: `core:*OnOffState` has no refresh command, so a missed event leaves it stale until the next change (seen 2026-08-24, all zones `off` while one cooled)
 - **`ExecutionState.NOT_TRANSMITTED` is NOT a failure** — the server reports it with `failure_type=NO_FAILURE`, and executions continue past it. Only `FAILED` is terminal, matching HA core. Any failure payload whose `failure_type_code` is `NO_FAILURE` must never roll back optimistic state
-- The zone control device (`#1`) exposes `refreshZones*` commands that refresh **every** zone in one execution — far cheaper than three commands per zone. `async_reconcile()` fires them at most hourly, at the end of its cycle, which is what bounds profile staleness
 - Refresh executions are sent with `track=False`: they change no state, so tracking them would pin the fast poll and block reconciliation for nothing
-- A zone on an internal schedule will report `stop` during scheduled-off windows, so HA shows it OFF even though the zone is enabled
 - `_real_*` properties read from device state; public properties check optimistic first
 - `time.monotonic` must be called, not bound as a `default_factory` — a bound reference escapes test clock patching

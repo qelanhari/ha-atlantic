@@ -1,1 +1,3 @@
-pytest-homeassistant-custom-component>=0.13
+# 0.13.367 ships HA 2026.9.x, the first harness at or above the integration's
+# declared minimum (2026.8.0). Needs Python 3.14.
+pytest-homeassistant-custom-component>=0.13.367

@@ -1,23 +1,21 @@
-"""The zone's on/off must come from the profile, not core:*OnOffState.
+"""A zone's on/off comes from core:*OnOffState alone.
 
-Reproduces a live divergence: every zone reported core:CoolingOnOffState
-'off' while the salon was actually cooling. The profile state and
-core:TargetTemperatureState both said so; only the OnOff state disagreed,
-and the API has no command to refresh it.
+io:PassAPC*ProfileState names where the setpoint comes from, not whether the
+zone runs. Live, 2026-10-04: Bureau was off (OnOff `off`) while its heating
+profile read `comfort`, then `externalSetpoint` after the remote was used,
+then nothing at all after re-sending `manu`.
 """
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from pyoverkiz.enums import DataType
-from pyoverkiz.models import EventState
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.core import HomeAssistant
 
-from .conftest import ZONE_URL, build_devices
+from .conftest import build_devices
 
 ZONE = "climate.zone_control_salon"
 
@@ -26,7 +24,7 @@ async def setup_with(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
     mock_client: MagicMock,
-    **kwargs: str,
+    **kwargs: str | None,
 ) -> None:
     """Set the integration up with a specific device state."""
     devices = build_devices(**kwargs)
@@ -42,51 +40,79 @@ async def setup_with(
         await hass.async_block_till_done()
 
 
-async def test_running_zone_reported_on_despite_stale_on_off(
+def mode_and_action(hass: HomeAssistant) -> tuple[str, str]:
+    """Return the zone's state and hvac_action."""
+    state = hass.states.get(ZONE)
+    return state.state, state.attributes["hvac_action"]
+
+
+async def test_on_zone_is_running(
     hass: HomeAssistant, config_entry, mock_client: MagicMock
 ) -> None:
-    """The live failure: profile says manu, the stale OnOff state says off."""
+    """OnOff on: the zone is on and conditioning."""
+    await setup_with(hass, config_entry, mock_client, cooling_on_off="on")
+
+    assert mode_and_action(hass) == (HVACMode.AUTO, HVACAction.COOLING)
+
+
+async def test_off_zone_is_idle_whatever_the_profile(
+    hass: HomeAssistant, config_entry, mock_client: MagicMock
+) -> None:
+    """A setpoint-source profile does not make an off zone run."""
     await setup_with(
         hass, config_entry, mock_client, cooling_profile="manu", cooling_on_off="off"
     )
 
-    state = hass.states.get(ZONE)
-    assert state.state == HVACMode.AUTO
-    assert state.attributes["hvac_action"] == HVACAction.COOLING
+    assert mode_and_action(hass) == (HVACMode.OFF, HVACAction.IDLE)
 
 
-async def test_stopped_zone_reported_off(
+async def test_bureau_external_setpoint_is_off(
     hass: HomeAssistant, config_entry, mock_client: MagicMock
 ) -> None:
-    """A stopped profile is off, even if the OnOff state still says on."""
+    """2026-10-04, Bureau: heating, profile externalSetpoint, OnOff off."""
     await setup_with(
-        hass, config_entry, mock_client, cooling_profile="stop", cooling_on_off="on"
+        hass,
+        config_entry,
+        mock_client,
+        operating_mode="heating",
+        heating_profile="externalSetpoint",
+        heating_on_off="off",
     )
 
-    state = hass.states.get(ZONE)
-    assert state.state == HVACMode.OFF
-    assert state.attributes["hvac_action"] == HVACAction.IDLE
+    assert mode_and_action(hass) == (HVACMode.OFF, HVACAction.IDLE)
 
 
-async def test_non_stop_profiles_are_all_running(
+async def test_bureau_comfort_is_off(
     hass: HomeAssistant, config_entry, mock_client: MagicMock
 ) -> None:
-    """comfort/eco/derogation all mean the zone is conditioning.
-
-    `cooling_on_off="off"` matters: without it the OnOff fallback would also
-    return AUTO and this test would pass against the old code.
-    """
+    """2026-10-04, Bureau: heating, profile comfort, OnOff off."""
     await setup_with(
-        hass, config_entry, mock_client, cooling_profile="comfort", cooling_on_off="off"
+        hass,
+        config_entry,
+        mock_client,
+        operating_mode="heating",
+        heating_profile="comfort",
+        heating_on_off="off",
+    )
+
+    assert hass.states.get(ZONE).state == HVACMode.OFF
+
+
+async def test_stop_profile_does_not_turn_an_on_zone_off(
+    hass: HomeAssistant, config_entry, mock_client: MagicMock
+) -> None:
+    """OnOff on wins over a `stop` profile."""
+    await setup_with(
+        hass, config_entry, mock_client, cooling_profile="stop", cooling_on_off="on"
     )
 
     assert hass.states.get(ZONE).state == HVACMode.AUTO
 
 
-async def test_falls_back_to_on_off_without_a_profile(
+async def test_works_without_a_profile(
     hass: HomeAssistant, config_entry, mock_client: MagicMock
 ) -> None:
-    """Devices that report no profile still work off the OnOff state."""
+    """Devices that report no profile are unaffected."""
     await setup_with(
         hass, config_entry, mock_client, cooling_profile=None, cooling_on_off="on"
     )
@@ -94,114 +120,17 @@ async def test_falls_back_to_on_off_without_a_profile(
     assert hass.states.get(ZONE).state == HVACMode.AUTO
 
 
-async def test_fallback_device_off_is_idle_not_cooling(
+async def test_heating_mode_uses_the_heating_on_off(
     hass: HomeAssistant, config_entry, mock_client: MagicMock
 ) -> None:
-    """A zone with no profile reported must still report IDLE when off."""
-    await setup_with(
-        hass, config_entry, mock_client, cooling_profile=None, cooling_on_off="off"
-    )
-
-    state = hass.states.get(ZONE)
-    assert state.state == HVACMode.OFF
-    assert state.attributes["hvac_action"] == HVACAction.IDLE
-
-
-async def test_heating_mode_uses_the_heating_profile(
-    hass: HomeAssistant, config_entry, mock_client: MagicMock
-) -> None:
-    """The heating profile drives the zone when the system is heating.
-
-    The fixture's heating profile is `stop`, so a heating system must report
-    the zone off even though its cooling profile says `manu`.
-    """
+    """A heating system reads core:HeatingOnOffState, not the cooling one."""
     await setup_with(
         hass,
         config_entry,
         mock_client,
         operating_mode="heating",
-        cooling_profile="manu",
+        cooling_on_off="on",
+        heating_on_off="off",
     )
-
-    state = hass.states.get(ZONE)
-    assert state.state == HVACMode.OFF
-    assert state.attributes["hvac_action"] == HVACAction.IDLE
-
-
-async def test_fresh_on_off_beats_stale_profile(
-    hass: HomeAssistant, setup_integration, mock_client: MagicMock
-) -> None:
-    """2026-08-25: zone commanded on, profile refresh never landed.
-
-    core:CoolingOnOffState arrived by event and says on; the profile is still
-    the `stop` loaded at startup. The zone is genuinely running, so the fresher
-    signal must win.
-    """
-    coordinator = setup_integration.runtime_data.coordinator
-    device = coordinator.devices[ZONE_URL]
-
-    device.states["io:PassAPCCoolingProfileState"] = EventState(
-        name="io:PassAPCCoolingProfileState", type=DataType.STRING, value="stop"
-    )
-    device.states["core:CoolingOnOffState"] = EventState(
-        name="core:CoolingOnOffState", type=DataType.STRING, value="on"
-    )
-    coordinator.note_state_update(ZONE_URL, "core:CoolingOnOffState")
-    coordinator.async_update_listeners()
-    await hass.async_block_till_done()
-
-    assert hass.states.get(ZONE).state == HVACMode.AUTO
-
-
-async def test_fresh_profile_beats_stale_on_off(
-    hass: HomeAssistant, setup_integration, mock_client: MagicMock
-) -> None:
-    """2026-08-24: zone running, core:CoolingOnOffState stale at off.
-
-    The mirror image of the case above; the profile is the fresher signal here.
-    """
-    coordinator = setup_integration.runtime_data.coordinator
-    device = coordinator.devices[ZONE_URL]
-
-    device.states["core:CoolingOnOffState"] = EventState(
-        name="core:CoolingOnOffState", type=DataType.STRING, value="off"
-    )
-    device.states["io:PassAPCCoolingProfileState"] = EventState(
-        name="io:PassAPCCoolingProfileState", type=DataType.STRING, value="manu"
-    )
-    coordinator.note_state_update(ZONE_URL, "io:PassAPCCoolingProfileState")
-    coordinator.async_update_listeners()
-    await hass.async_block_till_done()
-
-    assert hass.states.get(ZONE).state == HVACMode.AUTO
-
-
-async def test_profile_wins_without_recency_information(
-    hass: HomeAssistant, config_entry, mock_client: MagicMock
-) -> None:
-    """At startup nothing has a timestamp, so the profile decides."""
-    await setup_with(
-        hass, config_entry, mock_client, cooling_profile="manu", cooling_on_off="off"
-    )
-
-    assert hass.states.get(ZONE).state == HVACMode.AUTO
-
-
-async def test_both_off_stays_off_regardless_of_recency(
-    hass: HomeAssistant, setup_integration, mock_client: MagicMock
-) -> None:
-    """When the two signals agree, recency cannot flip the answer."""
-    coordinator = setup_integration.runtime_data.coordinator
-    device = coordinator.devices[ZONE_URL]
-
-    device.states["core:CoolingOnOffState"] = EventState(
-        name="core:CoolingOnOffState", type=DataType.STRING, value="off"
-    )
-    device.states["io:PassAPCCoolingProfileState"] = EventState(
-        name="io:PassAPCCoolingProfileState", type=DataType.STRING, value="stop"
-    )
-    coordinator.note_state_update(ZONE_URL, "core:CoolingOnOffState")
-    coordinator.async_update_listeners()
-    await hass.async_block_till_done()
 
     assert hass.states.get(ZONE).state == HVACMode.OFF
