@@ -64,6 +64,8 @@ def build_devices(
     *,
     cooling_profile: str | None = "manu",
     cooling_on_off: str = "on",
+    heating_profile: str = "stop",
+    heating_on_off: str = "off",
 ) -> list[Device]:
     """Build a zone control, one zone, and its temperature sensor.
 
@@ -74,7 +76,7 @@ def build_devices(
         if cooling_profile is None
         else {
             "io:PassAPCCoolingProfileState": (3, cooling_profile),
-            "io:PassAPCHeatingProfileState": (3, "stop"),
+            "io:PassAPCHeatingProfileState": (3, heating_profile),
         }
     )
 
@@ -92,7 +94,7 @@ def build_devices(
             "AtlanticPassAPCHeatingAndCoolingZone",
             {
                 "core:CoolingOnOffState": (3, cooling_on_off),
-                "core:HeatingOnOffState": (3, "off"),
+                "core:HeatingOnOffState": (3, heating_on_off),
                 "core:CoolingTargetTemperatureState": (2, 24.0),
                 "core:HeatingTargetTemperatureState": (2, 19.0),
                 "io:PassAPCCoolingModeState": (3, "manu"),

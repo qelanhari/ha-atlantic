@@ -66,7 +66,6 @@ from .const import (
     IGNORED_OVERKIZ_DEVICES,
     LOGGER,
     UPDATE_INTERVAL,
-    ZONES_REFRESH_INTERVAL,
 )
 
 EVENT_HANDLERS: Registry[
@@ -180,8 +179,6 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self._flush_attempt = 0
         self._consecutive_failures = 0
         self._degraded = False
-        self._last_profile_refresh = 0.0
-        self._state_updated_at: dict[tuple[str, str], float] = {}
         self.reconcile_urls: frozenset[str] = frozenset()
 
     # ------------------------------------------------------------------
@@ -203,28 +200,6 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
     def optimistic_generation(self, device_url: str) -> int:
         """Return the current invalidation generation for a device."""
         return self._optimistic_generation.get(device_url, 0)
-
-    # ------------------------------------------------------------------
-    # State freshness
-    # ------------------------------------------------------------------
-
-    @callback
-    def note_state_update(self, device_url: str, state_name: str) -> None:
-        """Record that the gateway just told us about this state."""
-        self._state_updated_at[(device_url, state_name)] = time.monotonic()
-
-    def state_age(self, device_url: str, state_name: str) -> float | None:
-        """Return seconds since this state was last reported, if ever.
-
-        None means the state has not been seen changing -- true for everything
-        loaded from get_setup() at startup. Callers comparing two states use
-        this to believe whichever the gateway reported most recently, because
-        no single Overkiz state is reliably fresh: the on/off states cannot be
-        refreshed at all, and profile refreshes do not always reach the
-        appliance.
-        """
-        updated_at = self._state_updated_at.get((device_url, state_name))
-        return None if updated_at is None else time.monotonic() - updated_at
 
     # ------------------------------------------------------------------
     # Polling
@@ -395,11 +370,6 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
                 "Reconcile clean: %d device(s) checked", len(self.reconcile_urls)
             )
 
-        # Warm the server's cache for the next cycle. Runs last and from this
-        # same coroutine, not a rival timer: the refresh registers an execution,
-        # and an execution in flight is exactly what makes reconcile skip.
-        await self._async_refresh_zone_profiles_if_due()
-
     async def _async_reconcile_states(self) -> int:
         """Merge fresh cloud states into the in-memory devices."""
         corrections = 0
@@ -432,7 +402,6 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             normalized.value,
         )
         device.states[normalized.name] = normalized
-        self.note_state_update(device.device_url, normalized.name)
         return 1
 
     @staticmethod
@@ -727,44 +696,6 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             Command(name=OverkizCommand.REFRESH_TARGET_TEMPERATURE),
         ]
 
-    async def _async_refresh_zone_profiles_if_due(self) -> None:
-        """Ask the gateway to re-read every zone's profile, at most hourly.
-
-        A zone's on/off now comes from its profile, so the profile must not be
-        allowed to go as stale as the on/off state it replaced. Reconciliation
-        only reads the server's cache; only a refresh execution updates that
-        cache from the appliance. The zone control device exposes `refreshZones*`
-        commands covering every zone in a single execution, which is far cheaper
-        against the exec rate limit than three commands per zone.
-        """
-        now = time.monotonic()
-        if now - self._last_profile_refresh < ZONES_REFRESH_INTERVAL.total_seconds():
-            return
-
-        zone_control_url = self._zone_control_url()
-        if zone_control_url is None:
-            return
-
-        commands = [
-            Command(name=OverkizCommand.REFRESH_ZONES_PASS_APC_COOLING_PROFILE),
-            Command(name=OverkizCommand.REFRESH_ZONES_PASS_APC_HEATING_PROFILE),
-            Command(name=OverkizCommand.REFRESH_ZONES_TARGET_TEMPERATURE),
-        ]
-
-        LOGGER.debug("Refreshing zone profiles via %s", zone_control_url)
-        self._last_profile_refresh = now
-
-        try:
-            await self._send_queue({zone_control_url: commands}, track=False)
-        except Exception:  # noqa: BLE001 - timer-driven; must not propagate
-            LOGGER.exception("Unexpected error refreshing zone profiles")
-
-    def _zone_control_url(self) -> str | None:
-        """Return the zone control device URL, if the setup has one."""
-        return next(
-            (url for url in sorted(self.reconcile_urls) if url.endswith("#1")), None
-        )
-
     async def _async_refresh_modes(self, device_urls: set[str]) -> None:
         """Refresh mode states for devices, batched into a single API call."""
         # Resolved per device: the operating mode is a property of each
@@ -935,7 +866,6 @@ async def on_device_state_changed(
 
     for state in event.device_states:
         device.states[state.name] = state
-        coordinator.note_state_update(event.device_url, state.name)
 
 
 @EVENT_HANDLERS.register(EventName.DEVICE_REMOVED)

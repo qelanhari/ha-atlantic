@@ -287,82 +287,28 @@ class AtlanticPassAPCZoneControlZone(
         return self._real_target_temperature
 
     @property
-    def _mode_states(self) -> tuple[str, str] | None:
-        """Return the (profile, on/off) state names for the system's mode."""
-        if self._is_heating_mode:
-            return (
-                OverkizState.IO_PASS_APC_HEATING_PROFILE,
-                OverkizState.CORE_HEATING_ON_OFF,
-            )
-        if self._is_cooling_mode:
-            return (
-                OverkizState.IO_PASS_APC_COOLING_PROFILE,
-                OverkizState.CORE_COOLING_ON_OFF,
-            )
-        return None
-
-    @property
-    def _profile_state(self) -> str | None:
-        """Return the active profile for the system's current mode.
-
-        The profile reports what the zone is doing: `stop` means it is not
-        conditioning, any other value names the setpoint in use (`manu`,
-        `comfort`, `eco`, ...).
-        """
-        if (names := self._mode_states) is None:
-            return None
-        return cast(str | None, self.executor.select_state(names[0]))
-
-    @property
     def _on_off_state(self) -> str | None:
-        """Return the zone's on/off state for the system's current mode."""
-        if (names := self._mode_states) is None:
+        """Return core:*OnOffState for the system's current mode.
+
+        The only state that says whether the zone is on. The profile
+        (`io:PassAPC*ProfileState`) names where the setpoint comes from --
+        `manu`, `comfort`, `externalSetpoint` (remote/room thermostat), ... --
+        and has stayed non-`stop`, or gone empty, while the zone was off.
+        """
+        if self._is_heating_mode:
+            name = OverkizState.CORE_HEATING_ON_OFF
+        elif self._is_cooling_mode:
+            name = OverkizState.CORE_COOLING_ON_OFF
+        else:
             return None
-        return cast(str | None, self.executor.select_state(names[1]))
-
-    def _mode_from_profile(self, profile: str) -> HVACMode:
-        """Map a profile value to on/off."""
-        return HVACMode.OFF if profile == OverkizCommandParam.STOP else HVACMode.AUTO
-
-    def _mode_from_on_off(self, on_off: str) -> HVACMode:
-        """Map an on/off value to on/off."""
-        return HVACMode.AUTO if on_off == OverkizCommandParam.ON else HVACMode.OFF
+        return cast(str | None, self.executor.select_state(name))
 
     @property
     def _real_hvac_mode(self) -> HVACMode:
-        """Return the actual hvac mode, trusting the fresher of two signals.
-
-        Neither Overkiz state is reliably current, and which one is stale
-        varies. `core:*OnOffState` has no refresh command at all, so a missed
-        event leaves it wrong indefinitely. `io:PassAPC*ProfileState` is
-        refreshable, but the refresh does not always reach the appliance.
-        Both have been observed stale on the same installation, in opposite
-        directions, days apart.
-
-        So believe whichever the gateway reported most recently. With no
-        recency information for either -- everything loaded from get_setup() at
-        startup -- prefer the profile, which is what the appliance acts on.
-        """
-        names = self._mode_states
-        if names is None:
-            return HVACMode.OFF
-
-        profile_name, on_off_name = names
-        profile = cast(str | None, self.executor.select_state(profile_name))
-        on_off = cast(str | None, self.executor.select_state(on_off_name))
-
-        if profile is None:
-            return HVACMode.OFF if on_off is None else self._mode_from_on_off(on_off)
-        if on_off is None:
-            return self._mode_from_profile(profile)
-
-        profile_age = self.coordinator.state_age(self.device_url, profile_name)
-        on_off_age = self.coordinator.state_age(self.device_url, on_off_name)
-
-        if on_off_age is not None and (profile_age is None or on_off_age < profile_age):
-            return self._mode_from_on_off(on_off)
-
-        return self._mode_from_profile(profile)
+        """Return AUTO if the zone's on/off state says on, else OFF."""
+        if self._on_off_state == OverkizCommandParam.ON:
+            return HVACMode.AUTO
+        return HVACMode.OFF
 
     @property
     def hvac_mode(self) -> HVACMode:
@@ -373,21 +319,8 @@ class AtlanticPassAPCZoneControlZone(
         return self._real_hvac_mode
 
     def _hvac_mode_confirmed(self, wanted: HVACMode) -> bool:
-        """Return True once either state agrees the zone is on or off.
-
-        Both are accepted because `_real_hvac_mode` now follows whichever is
-        fresher: waiting for one specific state would hold the assumption open
-        while the other has already confirmed it.
-        """
-        if self._real_hvac_mode == wanted:
-            return True
-
-        profile = self._profile_state
-        if profile is not None and self._mode_from_profile(profile) == wanted:
-            return True
-
-        on_off = self._on_off_state
-        return on_off is not None and self._mode_from_on_off(on_off) == wanted
+        """Return True once the device reports the mode we asked for."""
+        return self._real_hvac_mode == wanted
 
     def _temperature_confirmed(self, wanted: float) -> bool:
         """Return True once the device reports the temperature we asked for.
@@ -419,9 +352,7 @@ class AtlanticPassAPCZoneControlZone(
         action = OVERKIZ_TO_HVAC_ACTION.get(zone_mode, HVACAction.OFF)
 
         # The system is conditioning, but this zone's vent is closed.
-        # Deliberately keyed on hvac_mode, not the raw profile: hvac_mode is
-        # already profile-driven, and it also covers the optimistic window and
-        # devices that report no profile at all.
+        # Keyed on hvac_mode so the optimistic window is covered too.
         if (
             action in (HVACAction.HEATING, HVACAction.COOLING)
             and self.hvac_mode == HVACMode.OFF
